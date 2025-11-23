@@ -7,6 +7,7 @@
 # For more info, see http://inst.eecs.berkeley.edu/~cs188/sp09/pacman.html
 
 import random
+from ftplib import print_line
 
 import contest.util as util
 from contest.capture_agents import CaptureAgent
@@ -197,7 +198,6 @@ class CustomUniversalAgent(CaptureAgent):
         self.start = game_state.get_agent_position(self.index)
         CaptureAgent.register_initial_state(self, game_state)
 
-
     def choose_action(self, game_state):
         """
         Picks among the actions with the highest Q(s,a).
@@ -229,9 +229,6 @@ class CustomUniversalAgent(CaptureAgent):
         return random.choice(best_actions)
 
     def get_successor(self, game_state, action):
-        """
-        Finds the next successor which is a grid position (location tuple).
-        """
         successor = game_state.generate_successor(self.index, action)
         pos = successor.get_agent_state(self.index).get_position()
         if pos != nearest_point(pos):
@@ -245,8 +242,13 @@ class CustomUniversalAgent(CaptureAgent):
         Computes a linear combination of features and feature weights
         """
         features = self.get_features(game_state, action)
+        print("Current Features:", features)
+
         weights = self.get_weights(game_state, action)
-        return features * weights
+        value = features * weights
+
+        print("Current Value: ", value)
+        return value
 
     def get_features(self, game_state, action):
         """
@@ -255,11 +257,42 @@ class CustomUniversalAgent(CaptureAgent):
         features = util.Counter()
         successor = self.get_successor(game_state, action)
         features['successor_score'] = self.get_score(successor)
+
+        agent_position = game_state.get_agent_position(self.index)
+
+        invaders = self.get_invaders(successor)
+        features['invader_count'] = len(invaders)
+
+        closest_invader = self.get_closest_invader(agent_position, invaders)
+        if closest_invader is not None:
+            features['flee_factor'] = -10
+
+        food_list = self.get_food(successor).as_list()
+        if len(food_list) > 0:
+            my_pos = successor.get_agent_state(self.index).get_position()
+            min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
+            features['distance_to_food'] = min_distance
+
         return features
 
+    # Get's the base weights for this action
     def get_weights(self, game_state, action):
-        """
-        Normally, weights do not depend on the game state.  They can be either
-        a counter or a dictionary.
-        """
-        return {'successor_score': 1.0}
+
+
+        return {'successor_score': 1.0, 'distance_to_food': -1, 'invader_count': 10, 'closest_invader_distance': 0, 'flee_factor': 0}
+
+    def get_invaders(self, successor):
+        # Computes distance to invaders we can see
+        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
+        return [a for a in enemies if a.is_pacman and a.get_position() is not None]
+
+    def get_closest_invader(self, position, invaders):
+        distances = {}
+        for invader in invaders:
+            distance = self.get_maze_distance(position, invader.get_position())
+            distances[distance] = invader.get_position()
+
+        if len(distances) <= 0:
+            return None
+
+        return max(distances)
