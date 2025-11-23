@@ -1,8 +1,9 @@
 package data;
 
-import entity.EnemyData;
+import data.gson.EnemyData;
 import entity.Position;
 import enums.Direction;
+import java.util.ArrayList;
 import java.util.List;
 
 public class GameData {
@@ -22,11 +23,23 @@ public class GameData {
     }
 
     public List<Direction> getLegalDirections() {
-        return this.legalActions.stream().map(String::toUpperCase).map(Direction::valueOf).toList();
+        return new ArrayList<>(this.legalActions.stream().map(String::toUpperCase).map(Direction::valueOf).toList());
+    }
+
+    public Position getAgentPosition() {
+        return new Position(this.position.get(0), this.position.get(1));
     }
 
     public List<Position> getFoodPositions() {
+        return this.food.stream().map((it) -> new Position(it.get(0), it.get(1))).toList();
+    }
+
+    public List<Position> getWallPositions() {
         return this.walls.stream().map((it) -> new Position(it.get(0), it.get(1))).toList();
+    }
+
+    public boolean isPositionValid(Position position) {
+        return !this.getWallPositions().contains(position);
     }
 
     @Override

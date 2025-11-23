@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class Interpreter {
     private final GameInterpreter interpreter;
     private final HttpServer server;
-    private final Map<Request, HttpURLConnection> connections = new ConcurrentHashMap<>();
+    private final Map<Request, URL> endpoints = new ConcurrentHashMap<>();
 
     public static final Gson GSON = new Gson();
     private static final String BASE_URL = "http://127.0.0.1:5001/%s"; // Flask listening on 5001
@@ -33,13 +33,7 @@ public class Interpreter {
 
         for (final Request request : Request.values()) {
             final URL url = new URL(BASE_URL.formatted(request.getIdentifier()));
-            final HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-
-            conn.setRequestMethod("POST");
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json");
-
-            this.connections.put(request, conn);
+            this.endpoints.put(request, url);
         }
 
         this.interpreter = new GameInterpreter(this);
@@ -83,7 +77,7 @@ public class Interpreter {
             exchange.sendResponseHeaders(200, gson.length());
             OutputStream os = exchange.getResponseBody();
             os.write(gson.getBytes(StandardCharsets.UTF_8));
-            os.close();
+            os.flush();
         } catch (Exception e) {
             System.out.println("Failed to respond for gson: " + gson);
             e.printStackTrace();
@@ -102,27 +96,48 @@ public class Interpreter {
         return true;
     }
 
-    public String callPython(Request request, Object payload) {
+    public <T> T callPython(Request request, Object payload) {
         try {
-            final HttpURLConnection connection = this.connections.get(request);
+            final HttpURLConnection connection = this.createConnection(request);
             final String json = GSON.toJson(payload);
 
             try (OutputStream os = connection.getOutputStream()) {
-                os.write(json.getBytes());
+                os.write(json.getBytes(StandardCharsets.UTF_8));
+                os.flush();
             }
 
-            final BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-            final StringBuilder sb = new StringBuilder();
-            String line;
-
-            while ((line = br.readLine()) != null) {
-                sb.append(line);
+            int code = connection.getResponseCode();
+            if (code != HttpURLConnection.HTTP_OK) {
+                throw new RuntimeException("Python returned HTTP " + code);
             }
 
-            return sb.toString();
+            // Read response
+            try (final BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
+                final StringBuilder builder = new StringBuilder();
+                String line;
+                while ((line = br.readLine()) != null) {
+                    builder.append(line);
+                }
+
+                return request.getConversion(builder.toString());
+            }
         } catch (Exception e) {
             e.printStackTrace();
             return null;
+        }
+    }
+
+    private HttpURLConnection createConnection(Request request) {
+        final URL url = this.endpoints.get(request);
+
+        try {
+            final HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            return connection;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to open a connection for url '" + url + "'");
         }
     }
 }
