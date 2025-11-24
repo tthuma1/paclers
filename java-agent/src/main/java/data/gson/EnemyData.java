@@ -1,5 +1,6 @@
 package data.gson;
 
+import entity.Position;
 import java.util.List;
 
 public class EnemyData {
@@ -13,6 +14,14 @@ public class EnemyData {
 
     public List<Integer> getPos() {
         return this.pos;
+    }
+
+    public Position getPosition() {
+        if (this.pos == null) {
+            return null;
+        }
+
+        return new Position(this.pos.get(0), this.pos.get(1));
     }
 
     public boolean isPacman() {

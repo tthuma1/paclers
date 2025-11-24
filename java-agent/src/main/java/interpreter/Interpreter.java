@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import data.GameData;
+import entity.Position;
+import enums.Direction;
 import enums.Request;
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -27,7 +29,6 @@ public class Interpreter {
     public Interpreter() throws Exception {
         this.server = HttpServer.create(new InetSocketAddress(8080), 0);
         this.server.createContext("/choose_action", this::handleMove);
-        this.server.createContext("/get_features", this::handleGetFeatures);
         this.server.setExecutor(null);
         this.server.start();
 
@@ -49,23 +50,11 @@ public class Interpreter {
             try (InputStream body = exchange.getRequestBody()) {
                 final String requestJson = new String(body.readAllBytes(), StandardCharsets.UTF_8);
                 final GameData gameData = GSON.fromJson(requestJson, GameData.class);
-                this.sendResponse(exchange, this.interpreter.handleMove(gameData));
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+                final Direction response = this.interpreter.handleMove(gameData);
+                final Position current = gameData.getAgentPosition();
 
-    private void handleGetFeatures(HttpExchange exchange) {
-        try {
-            if (!this.handleRequest(exchange)) {
-                return;
-            }
-
-            try (InputStream body = exchange.getRequestBody()) {
-                final String requestJson = new String(body.readAllBytes(), StandardCharsets.UTF_8);
-                final GameData gameData = GSON.fromJson(requestJson, GameData.class);
-                this.sendResponse(exchange, this.interpreter.handleGetFeatures(gameData));
+                System.out.println("Move: " + response + " (current=" + current + ", next=" + response.applyModifier(current) + ")");
+                this.sendResponse(exchange, response.toString());
             }
         } catch (Exception e) {
             e.printStackTrace();

@@ -34,6 +34,10 @@ public class GameData {
         return this.food.stream().map((it) -> new Position(it.get(0), it.get(1))).toList();
     }
 
+    public List<EnemyData> getEnemies() {
+        return this.enemies;
+    }
+
     public List<Position> getWallPositions() {
         return this.walls.stream().map((it) -> new Position(it.get(0), it.get(1))).toList();
     }

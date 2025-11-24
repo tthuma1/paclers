@@ -1,8 +1,10 @@
 package interpreter;
 
 import data.GameData;
+import data.gson.EnemyData;
 import entity.Pair;
 import entity.Position;
+import entity.PositionPath;
 import entity.request.DistanceRequest;
 import enums.Direction;
 import enums.GameState;
@@ -17,47 +19,99 @@ import java.util.concurrent.ThreadLocalRandom;
 public class GameInterpreter {
     private final Interpreter interpreter;
 
-    private GameState gameState = GameState.ATTACKING;
-    private Direction previousMove;
-    private Position targetPosition;
-    private int distanceToPosition;
+    private GameState gameState = GameState.FINDING_FOOD;
+    private GameState previousGameState;
+    private GameData previousData;
+    private PositionPath positionPath;
+    private Position lastSafePosition;
+    private Position startingPosition;
+    private Position previousPosition;
+    private Position previousFoodPosition;
+    private int collectedFood;
 
     public GameInterpreter(Interpreter interpreter) {
         this.interpreter = interpreter;
     }
 
-    public String handleMove(GameData gameData) {
-        System.out.println("Handle Move was called, parsing (moves till goal '" + this.distanceToPosition + "')");
-        final List<Direction> legalMoves = gameData.getLegalDirections();
-
-        // Handles the case when we're attacking
-        final Pair<Direction, Integer> attackingHandle = this.handleAttack(gameData, legalMoves);
-        if (attackingHandle != null) {
-            System.out.println("Attacking handle wasn't null, returning (" +  attackingHandle + ")");
-
-            this.distanceToPosition = attackingHandle.getSecond();
-            this.previousMove = attackingHandle.getFirst();
-            return attackingHandle.getFirst().toString();
-        }
-
-        final Direction optimalMove = this.getMostOptimalDirection(legalMoves);
-        System.out.println("Returning move '" + optimalMove + "'");
-        this.previousMove = optimalMove;
-        return optimalMove.toString();
+    private void setGameState(GameState gameState) {
+        this.previousGameState = this.gameState;
+        System.out.println("Setting GameState to '" + gameState + "' (Previous = " + this.previousGameState + ")");
+        this.gameState = gameState;
     }
 
-    // Returns the current states direction, and required moves for it
-    private Pair<Direction, Integer> handleAttack(GameData gameData, List<Direction> legalMoves) {
-        if (this.gameState != GameState.ATTACKING) {
+    public Direction handleMove(GameData gameData) {
+        final List<Direction> legalMoves = gameData.getLegalDirections();
+        final Position currentPosition = gameData.getAgentPosition();
+        if (this.startingPosition == null) {
+            this.startingPosition = currentPosition;
+        }
+
+        // Handles resetting of goals if we died
+        this.handleDeath(gameData);
+
+        // Handles the case when we care about dying
+        final Pair<Direction, Integer> fleeingHandle = this.handleFleeing(gameData, legalMoves);
+        if (fleeingHandle != null) {
+            this.previousPosition = currentPosition;
+            this.previousData = gameData;
+            return fleeingHandle.getFirst();
+        }
+
+        // Handles the case when we're finding food
+        final Pair<Direction, Integer> findingFoodHandle = this.handleFindingFood(gameData, legalMoves);
+        if (findingFoodHandle != null) {
+            this.previousPosition = currentPosition;
+            this.previousData = gameData;
+            return findingFoodHandle.getFirst();
+        }
+
+        // Handles the case when we're depositing food
+        final Pair<Direction, Integer> depositingHandle = this.handleDeposit(gameData, legalMoves);
+        if (depositingHandle != null) {
+            this.previousPosition = currentPosition;
+            this.previousData = gameData;
+            return depositingHandle.getFirst();
+        }
+
+        final PositionPath currentPath = this.positionPath;
+        if (currentPath != null) {
+            final Position nextStep = currentPath.step();
+            // The path was completed, set it to null
+            if (nextStep == null) {
+                this.positionPath = null;
+            }
+
+
+        }
+
+
+
+        final Direction defaultMove = legalMoves.get(ThreadLocalRandom.current().nextInt(legalMoves.size()));
+        this.previousPosition = currentPosition;
+        this.previousData = gameData;
+        return defaultMove;
+    }
+
+    private Pair<Direction, Integer> handleFindingFood(GameData gameData, List<Direction> legalMoves) {
+        if (this.gameState != GameState.FINDING_FOOD) {
             return null;
         }
 
+        final Position currentPosition = gameData.getAgentPosition();
         if (this.distanceToPosition <= 0) {
+            if (this.previousData != null && this.previousData.getFoodPositions().contains(currentPosition)) {
+                this.collectedFood++;
+                System.out.println("Collected food at '" + currentPosition + "' (total = " + this.collectedFood + ")");
+            }
+
             this.targetPosition = null;
             this.distanceToPosition = 0;
         }
 
-        final Position currentPosition = gameData.getAgentPosition();
+        if (this.collectedFood >= 5) {
+            this.setGameState(GameState.DEPOSITING_FOOD);
+            return null;
+        }
 
         // Go towards the closest food
         if (this.targetPosition == null) {
@@ -71,23 +125,110 @@ public class GameInterpreter {
 
             this.targetPosition = closestFood;
             this.distanceToPosition = distanceToFood;
+            this.previousFoodPosition = closestFood;
         }
 
+        return this.getNextLegalMove(gameData, currentPosition, legalMoves);
+    }
+
+    private Pair<Direction, Integer> handleDeposit(GameData gameData, List<Direction> legalMoves) {
+        if (this.gameState != GameState.DEPOSITING_FOOD) {
+            return null;
+        }
+
+        final Position currentPosition = gameData.getAgentPosition();
+        if (this.targetPosition == null) {
+            this.targetPosition = this.lastSafePosition;
+            this.distanceToPosition = this.getDistance(gameData.getAgentPosition(), this.targetPosition);
+        }
+
+        if (this.distanceToPosition <= 0) {
+            this.targetPosition = null;
+            this.distanceToPosition = 0;
+            this.collectedFood = 0;
+
+            this.setGameState(GameState.FINDING_FOOD);
+            return null;
+        }
+
+        return this.getNextLegalMove(gameData, currentPosition, legalMoves);
+    }
+
+    private Pair<Direction, Integer> handleFleeing(GameData gameData, List<Direction> legalMoves) {
+        final Position currentPosition = gameData.getAgentPosition();
+        if (currentPosition.x() > 16 && !currentPosition.equals(this.lastSafePosition)) { // TODO: No magic numbers
+            this.lastSafePosition = currentPosition;
+            return null;
+        }
+
+        final EnemyData validEnemy = this.getValidEnemy(gameData, currentPosition);
+        if (validEnemy != null && this.gameState != GameState.FLEEING) {
+            this.targetPosition = this.lastSafePosition;
+            this.distanceToPosition = this.getDistance(gameData.getAgentPosition(), this.targetPosition);
+            this.setGameState(GameState.FLEEING);
+        }
+
+        if (this.gameState == GameState.FLEEING && this.distanceToPosition == 0) {
+            this.setGameState(this.previousGameState);
+            return null;
+        }
+
+        return this.getNextLegalMove(gameData, currentPosition, legalMoves);
+    }
+
+    private EnemyData getValidEnemy(GameData gameData, Position currentPosition) {
+        final List<EnemyData> enemies = gameData.getEnemies();
+        for (final EnemyData enemy : enemies) {
+            final Position enemyPosition = enemy.getPosition();
+            // Enemy position is unknown
+            if (enemyPosition == null || enemyPosition.x() > 16) { // TODO: No magic numbers
+                continue;
+            }
+
+            final int distance = this.getDistance(currentPosition, enemyPosition);
+            // If it's more than 3 squares away, ignore it
+            if (distance > 3) {
+                continue;
+            }
+
+            return enemy;
+        }
+
+        return null;
+    }
+
+    private void handleDeath(GameData gameData) {
+        final Position currentPosition = gameData.getAgentPosition();
+        if (this.previousPosition == null) {
+            return;
+        }
+
+        // We moved a valid amount of distance from previous
+        if (currentPosition.distance(this.previousPosition) <= 1) {
+            return;
+        }
+
+        this.targetPosition = null;
+        this.previousPosition = null;
+        this.previousMove = null;
+        this.previousData = null;
+        this.distanceToPosition = 0;
+        this.collectedFood = 0;
+    }
+
+    private Pair<Direction, Integer> getNextLegalMove(GameData gameData, Position currentPosition, List<Direction> legalMoves) {
         Pair<Direction, Integer> towardsTargetEntry = null;
         for (final Direction direction : Direction.VALUES) {
             if (!legalMoves.contains(direction)) {
-                System.out.println("Direction " + direction + " not in legalMoves");
                 continue;
             }
 
             final Position updatedPosition = direction.applyModifier(currentPosition);
             if (!gameData.isPositionValid(updatedPosition)) {
-                System.out.println("Position " + updatedPosition + " is invalid");
                 continue;
             }
 
             final int distance = this.getDistance(updatedPosition, this.targetPosition);
-            // If the distance is more than the previous one, it's a bad move
             if (distance > this.distanceToPosition) {
                 continue;
             }
@@ -104,55 +245,7 @@ public class GameInterpreter {
             towardsTargetEntry = new Pair<>(direction, distance);
         }
 
-        System.out.println("Next Move: " + towardsTargetEntry);
         return towardsTargetEntry;
-    }
-
-    /**
-     * features = util.Counter()
-     * successor = self.get_successor(game_state, action)
-     * print("Successor ", successor)
-     * <p>
-     * features['successor_score'] = self.get_score(successor)
-     * <p>
-     * agent_position = game_state.get_agent_position(self.index)
-     * <p>
-     * invaders = self.get_invaders(successor)
-     * features['invader_count'] = len(invaders)
-     * <p>
-     * closest_invader = self.get_closest_invader(agent_position, invaders)
-     * if closest_invader is not None:
-     * features['flee_factor'] = -10
-     * <p>
-     * food_list = self.get_food(successor).as_list()
-     * if len(food_list) > 0:
-     * my_pos = successor.get_agent_state(self.index).get_position()
-     * min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
-     * features['distance_to_food'] = min_distance
-     */
-
-    public String handleGetFeatures(GameData gameData) {
-        System.out.println("Get Features was called, parsing");
-        final Pair<Position, Integer> closestFood = this.getClosestFood(gameData);
-
-        return Interpreter.GSON.toJson(Map.of(
-            "distance_to_food", closestFood == null ? 0 : closestFood.getSecond(),
-            "closest_food_position", closestFood == null ? "null" : closestFood.getFirst()
-        ));
-    }
-
-    private Direction getMostOptimalDirection(List<Direction> legalMoves) {
-        legalMoves.remove(Direction.STOP); // Remove stop since we want to actually move right now
-
-        if (this.previousMove != null && legalMoves.contains(this.previousMove)) {
-            return this.previousMove;
-        }
-
-        if (legalMoves.isEmpty()) {
-            return Direction.STOP;
-        }
-
-        return legalMoves.get(ThreadLocalRandom.current().nextInt(legalMoves.size()));
     }
 
     private Pair<Position, Integer> getClosestFood(GameData gameData) {
@@ -160,11 +253,16 @@ public class GameInterpreter {
         final Map<Position, Integer> mappedPositions = new HashMap<>();
 
         for (final Position position : gameData.getFoodPositions()) {
+            if (this.previousFoodPosition != null && this.previousFoodPosition.equals(position)) {
+                continue; // If we've already targeted this position, move to a different one instead
+            }
+
             final int distance = this.getDistance(agentPosition, position);
             mappedPositions.put(position, distance);
         }
 
-        final Optional<Map.Entry<Position, Integer>> closest = mappedPositions.entrySet().stream().min(Comparator.comparingInt(Map.Entry::getValue));
+        final Optional<Map.Entry<Position, Integer>> closest = mappedPositions.entrySet()
+            .stream().min(Comparator.comparingInt(Map.Entry::getValue));
         if (closest.isEmpty()) {
             return null;
         }
@@ -175,6 +273,7 @@ public class GameInterpreter {
 
     private int getDistance(Position first, Position second) {
         final DistanceRequest request = new DistanceRequest(first, second);
-        return this.interpreter.callPython(Request.DISTANCE_REQUEST, request);
+        final Integer distance = this.interpreter.callPython(Request.DISTANCE_REQUEST, request);
+        return distance == null ? Integer.MAX_VALUE : distance;
     }
 }

@@ -2,7 +2,9 @@ package enums;
 
 public enum GameState {
 
-    ATTACKING,
+    FINDING_FOOD,
+    DEPOSITING_FOOD,
+    FLEEING,
     DEFENDING
 
 }
