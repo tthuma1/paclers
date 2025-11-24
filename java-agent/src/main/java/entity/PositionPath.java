@@ -17,6 +17,23 @@ public class PositionPath {
 
     public PositionPath(GameData gameData, Position starting, Position ending) {
         this.positions = this.generatePositions(gameData, starting, ending);
+        this.positions.remove(starting); // Remove where we're currently standing
+    }
+
+    public boolean isEmpty() {
+        return this.positions.isEmpty();
+    }
+
+    public int getNeededSteps() {
+        return this.positions.size();
+    }
+
+    public int getCurrentStepIndex() {
+        return this.currentStep;
+    }
+
+    public boolean isCompleted() {
+        return this.currentStep == this.positions.size();
     }
 
     public Position step() {
@@ -105,6 +122,15 @@ public class PositionPath {
             new Position(pos.x(), pos.y() + 1),
             new Position(pos.x(), pos.y() - 1)
         );
+    }
+
+    @Override
+    public String toString() {
+        if (this.positions.isEmpty()) {
+            return "Path[empty]";
+        }
+
+        return "Path[start=%s,end=%s,steps=%s]".formatted(this.positions.get(0), this.positions.get(this.positions.size() - 1), this.positions.size());
     }
 
     private static class Node {

@@ -20,6 +20,17 @@ public enum Direction {
         this.modifier = modifier;
     }
 
+    public static Direction fromPosition(Position from, Position to) {
+        for (Direction direction : Direction.VALUES) {
+            final Position directional = direction.applyModifier(from);
+            if (directional.equals(to)) {
+                return direction;
+            }
+        }
+
+        return null;
+    }
+
     public Position applyModifier(Position position) {
         return this.modifier.apply(position);
     }

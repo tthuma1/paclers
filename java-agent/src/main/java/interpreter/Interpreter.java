@@ -53,7 +53,7 @@ public class Interpreter {
                 final Direction response = this.interpreter.handleMove(gameData);
                 final Position current = gameData.getAgentPosition();
 
-                System.out.println("Move: " + response + " (current=" + current + ", next=" + response.applyModifier(current) + ")");
+                //System.out.println("Move: " + response + " (current=" + current + ", next=" + response.applyModifier(current) + ")");
                 this.sendResponse(exchange, response.toString());
             }
         } catch (Exception e) {

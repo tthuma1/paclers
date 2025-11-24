@@ -14,10 +14,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
 
 public class GameInterpreter {
     private final Interpreter interpreter;
+    private final Map<GameState, Consumer<GameData>> registeredGameStates;
 
     private GameState gameState = GameState.FINDING_FOOD;
     private GameState previousGameState;
@@ -31,12 +34,27 @@ public class GameInterpreter {
 
     public GameInterpreter(Interpreter interpreter) {
         this.interpreter = interpreter;
+
+        this.registeredGameStates = new ConcurrentHashMap<>() {{
+            this.put(GameState.FINDING_FOOD, GameInterpreter.this::handleFindingFood);
+            this.put(GameState.DEPOSITING_FOOD, GameInterpreter.this::handleDepositFood);
+            this.put(GameState.FLEEING, GameInterpreter.this::handleFleeing);
+            //this.put(GameState.DEFENDING, GameInterpreter.this::handleDefending);
+        }};
     }
 
     private void setGameState(GameState gameState) {
+        if (!this.registeredGameStates.containsKey(gameState)) {
+            return;
+        }
+
         this.previousGameState = this.gameState;
-        System.out.println("Setting GameState to '" + gameState + "' (Previous = " + this.previousGameState + ")");
         this.gameState = gameState;
+    }
+
+    private void setPositionPath(PositionPath positionPath, String reason) {
+        this.positionPath = positionPath;
+        System.out.println("Set new position with reason '" + reason + "'");
     }
 
     public Direction handleMove(GameData gameData) {
@@ -46,134 +64,164 @@ public class GameInterpreter {
             this.startingPosition = currentPosition;
         }
 
+        if (gameData.isPositionSafe(currentPosition) && !currentPosition.equals(this.lastSafePosition)) {
+            this.lastSafePosition = currentPosition;
+        }
+
         // Handles resetting of goals if we died
         this.handleDeath(gameData);
 
-        // Handles the case when we care about dying
-        final Pair<Direction, Integer> fleeingHandle = this.handleFleeing(gameData, legalMoves);
-        if (fleeingHandle != null) {
-            this.previousPosition = currentPosition;
-            this.previousData = gameData;
-            return fleeingHandle.getFirst();
+        for (final Map.Entry<GameState, Consumer<GameData>> entry : this.registeredGameStates.entrySet()) {
+            final Consumer<GameData> stateConsumer = entry.getValue();
+            stateConsumer.accept(gameData);
         }
 
-        // Handles the case when we're finding food
-        final Pair<Direction, Integer> findingFoodHandle = this.handleFindingFood(gameData, legalMoves);
-        if (findingFoodHandle != null) {
-            this.previousPosition = currentPosition;
-            this.previousData = gameData;
-            return findingFoodHandle.getFirst();
-        }
+        if (this.positionPath != null) {
+            final Position nextStep = this.positionPath.step();
+            if (nextStep != null) {
+                final Direction move = Direction.fromPosition(currentPosition, nextStep);
+                if (move != null && legalMoves.contains(move)) {
 
-        // Handles the case when we're depositing food
-        final Pair<Direction, Integer> depositingHandle = this.handleDeposit(gameData, legalMoves);
-        if (depositingHandle != null) {
-            this.previousPosition = currentPosition;
-            this.previousData = gameData;
-            return depositingHandle.getFirst();
-        }
-
-        final PositionPath currentPath = this.positionPath;
-        if (currentPath != null) {
-            final Position nextStep = currentPath.step();
-            // The path was completed, set it to null
-            if (nextStep == null) {
-                this.positionPath = null;
+                    this.previousPosition = currentPosition;
+                    this.previousData = gameData;
+                    return move;
+                }
             }
 
-
+            this.setPositionPath(null, "Current finished, clearing");
         }
 
-
-
+        // Fallback
         final Direction defaultMove = legalMoves.get(ThreadLocalRandom.current().nextInt(legalMoves.size()));
         this.previousPosition = currentPosition;
         this.previousData = gameData;
+        System.out.println("Fallback move: " + defaultMove);
         return defaultMove;
     }
 
-    private Pair<Direction, Integer> handleFindingFood(GameData gameData, List<Direction> legalMoves) {
-        if (this.gameState != GameState.FINDING_FOOD) {
-            return null;
+    private void handleFindingFood(GameData gameData) {
+        final int remainingFood = gameData.getFoodPositions().size();
+        final int remainingDefendingFood = gameData.getDefendingFoodPositions().size();
+
+        final Pair<Position, Integer> closestFoodEntry = this.getClosestFood(gameData);
+        if (this.gameState != GameState.FINDING_FOOD && this.gameState != GameState.DEPOSITING_FOOD) {
+            return;
+        }
+
+        // When we're winning, and we have more food than the enemy, move to defense
+        if (gameData.getScore() > 0 && remainingDefendingFood > remainingFood) {
+            if (this.registeredGameStates.containsKey(GameState.DEFENDING)) {
+                this.registeredGameStates.remove(GameState.FINDING_FOOD);
+                this.registeredGameStates.remove(GameState.DEPOSITING_FOOD);
+
+                this.setGameState(GameState.DEFENDING);
+                return;
+            }
+        }
+
+        if (remainingFood == 0 && (this.positionPath == null || this.positionPath.isCompleted())) {
+            final PositionPath closestSafe = this.getClosestSafePosition(gameData);
+            if (closestSafe != null) {
+                this.setPositionPath(closestSafe, "All food has been consumed, returning home");
+            }
+            return;
         }
 
         final Position currentPosition = gameData.getAgentPosition();
-        if (this.distanceToPosition <= 0) {
-            if (this.previousData != null && this.previousData.getFoodPositions().contains(currentPosition)) {
-                this.collectedFood++;
-                System.out.println("Collected food at '" + currentPosition + "' (total = " + this.collectedFood + ")");
-            }
-
-            this.targetPosition = null;
-            this.distanceToPosition = 0;
+        final boolean isFoodSquare = this.previousData != null && this.previousData.getFoodPositions().contains(currentPosition);
+        if (isFoodSquare) {
+            this.collectedFood++;
         }
 
-        if (this.collectedFood >= 5) {
+        // If we've collected 5 food, and we don't have any new food directly next to us (gluttony is a sin)
+        if (this.collectedFood >= 5 && (closestFoodEntry != null && closestFoodEntry.getSecond() >= 2)) {
             this.setGameState(GameState.DEPOSITING_FOOD);
-            return null;
+            return;
         }
 
-        // Go towards the closest food
-        if (this.targetPosition == null) {
-            final Pair<Position, Integer> closestFoodEntry = this.getClosestFood(gameData);
-            if (closestFoodEntry == null) {
-                throw new RuntimeException("No closed food found");
-            }
-
-            final Position closestFood = closestFoodEntry.getFirst();
-            final int distanceToFood = closestFoodEntry.getSecond();
-
-            this.targetPosition = closestFood;
-            this.distanceToPosition = distanceToFood;
-            this.previousFoodPosition = closestFood;
+        if (this.positionPath != null && !this.positionPath.isCompleted() || closestFoodEntry == null) {
+            return;
         }
 
-        return this.getNextLegalMove(gameData, currentPosition, legalMoves);
+        final Position closestFood = closestFoodEntry.getFirst();
+        this.setPositionPath(new PositionPath(gameData, currentPosition, closestFood), "New food found (" + closestFood + ")");
+        this.previousFoodPosition = closestFood;
     }
 
-    private Pair<Direction, Integer> handleDeposit(GameData gameData, List<Direction> legalMoves) {
-        if (this.gameState != GameState.DEPOSITING_FOOD) {
-            return null;
-        }
-
+    private void handleDepositFood(GameData gameData) {
         final Position currentPosition = gameData.getAgentPosition();
-        if (this.targetPosition == null) {
-            this.targetPosition = this.lastSafePosition;
-            this.distanceToPosition = this.getDistance(gameData.getAgentPosition(), this.targetPosition);
-        }
 
-        if (this.distanceToPosition <= 0) {
-            this.targetPosition = null;
-            this.distanceToPosition = 0;
+        // When our goal isn't explicitly a deposit, however we still return food
+        if (this.collectedFood > 0 && gameData.isPositionSafe(currentPosition)) {
             this.collectedFood = 0;
-
-            this.setGameState(GameState.FINDING_FOOD);
-            return null;
         }
 
-        return this.getNextLegalMove(gameData, currentPosition, legalMoves);
+        if (this.gameState != GameState.DEPOSITING_FOOD) {
+            return;
+        }
+
+        // Deposit the food to the last safe position; TODO: Find the closest safe position instead
+        if (this.positionPath == null) {
+            final PositionPath closestSafe = this.getClosestSafePosition(gameData);
+            if (closestSafe != null) {
+                this.setPositionPath(closestSafe, "Depositing food");
+            }
+            return;
+        }
+
+        if (!this.positionPath.isCompleted()) {
+            return;
+        }
+
+        this.setPositionPath(null, "Clearing position path, deposited food");
+        this.collectedFood = 0;
+        this.setGameState(GameState.FINDING_FOOD);
     }
 
-    private Pair<Direction, Integer> handleFleeing(GameData gameData, List<Direction> legalMoves) {
+    private void handleFleeing(GameData gameData) {
         final Position currentPosition = gameData.getAgentPosition();
-        if (currentPosition.x() > 16 && !currentPosition.equals(this.lastSafePosition)) { // TODO: No magic numbers
-            this.lastSafePosition = currentPosition;
-            return null;
+        if (this.gameState == GameState.FLEEING && this.positionPath == null) {
+            this.setGameState(this.previousGameState);
+            return;
         }
 
         final EnemyData validEnemy = this.getValidEnemy(gameData, currentPosition);
-        if (validEnemy != null && this.gameState != GameState.FLEEING) {
-            this.targetPosition = this.lastSafePosition;
-            this.distanceToPosition = this.getDistance(gameData.getAgentPosition(), this.targetPosition);
-            this.setGameState(GameState.FLEEING);
+        if (validEnemy == null || this.gameState == GameState.FLEEING) {
+            return;
         }
 
-        if (this.gameState == GameState.FLEEING && this.distanceToPosition == 0) {
-            this.setGameState(this.previousGameState);
-            return null;
+        // TODO: Find the enemies path and avoid it
+        final PositionPath closestSafe = this.getClosestSafePosition(gameData);
+        if (closestSafe != null) {
+            this.setPositionPath(closestSafe, "Enemy found, fleeing");
         }
 
-        return this.getNextLegalMove(gameData, currentPosition, legalMoves);
+        this.setGameState(GameState.FLEEING);
+    }
+
+    private void handleDefending(GameData gameData) {
+        if (this.gameState != GameState.DEFENDING) {
+            return;
+        }
+
+        final Position currentPosition = gameData.getAgentPosition();
+        // If we're not on our side of the map, we want to return to base
+        if (!gameData.isPositionSafe(currentPosition)) {
+            this.setPositionPath(new PositionPath(gameData, currentPosition, this.lastSafePosition), "Moving to defense");
+            return;
+        }
+
+        // Already have an active goal; TODO: Find nearby enemies, if we find one close enough, move to intercept
+        if (this.positionPath != null && !this.positionPath.isCompleted()) {
+            return;
+        }
+
+        final Position randomDefendingPosition = this.getRandomClose(gameData, currentPosition, 10);
+        if (randomDefendingPosition == null) {
+            return;
+        }
+
+        this.setPositionPath(new PositionPath(gameData, currentPosition, randomDefendingPosition), "Moving to a new defensive position");
     }
 
     private EnemyData getValidEnemy(GameData gameData, Position currentPosition) {
@@ -181,7 +229,7 @@ public class GameInterpreter {
         for (final EnemyData enemy : enemies) {
             final Position enemyPosition = enemy.getPosition();
             // Enemy position is unknown
-            if (enemyPosition == null || enemyPosition.x() > 16) { // TODO: No magic numbers
+            if (enemyPosition == null || gameData.isPositionSafe(enemyPosition)) {
                 continue;
             }
 
@@ -208,44 +256,12 @@ public class GameInterpreter {
             return;
         }
 
-        this.targetPosition = null;
+        System.out.println("Agent got munched");
+        this.gameState = GameState.FINDING_FOOD;
+        this.setPositionPath(null, "Agent died, clearing");
         this.previousPosition = null;
-        this.previousMove = null;
         this.previousData = null;
-        this.distanceToPosition = 0;
         this.collectedFood = 0;
-    }
-
-    private Pair<Direction, Integer> getNextLegalMove(GameData gameData, Position currentPosition, List<Direction> legalMoves) {
-        Pair<Direction, Integer> towardsTargetEntry = null;
-        for (final Direction direction : Direction.VALUES) {
-            if (!legalMoves.contains(direction)) {
-                continue;
-            }
-
-            final Position updatedPosition = direction.applyModifier(currentPosition);
-            if (!gameData.isPositionValid(updatedPosition)) {
-                continue;
-            }
-
-            final int distance = this.getDistance(updatedPosition, this.targetPosition);
-            if (distance > this.distanceToPosition) {
-                continue;
-            }
-
-            if (towardsTargetEntry == null) {
-                towardsTargetEntry = new Pair<>(direction, distance);
-                continue;
-            }
-
-            if (towardsTargetEntry.getSecond() > distance) {
-                continue;
-            }
-
-            towardsTargetEntry = new Pair<>(direction, distance);
-        }
-
-        return towardsTargetEntry;
     }
 
     private Pair<Position, Integer> getClosestFood(GameData gameData) {
@@ -274,6 +290,67 @@ public class GameInterpreter {
     private int getDistance(Position first, Position second) {
         final DistanceRequest request = new DistanceRequest(first, second);
         final Integer distance = this.interpreter.callPython(Request.DISTANCE_REQUEST, request);
-        return distance == null ? Integer.MAX_VALUE : distance;
+        return distance == null ? -1 : distance;
+    }
+
+    private PositionPath getClosestSafePosition(GameData gameData) {
+        if (this.lastSafePosition == null) {
+            return null;
+        }
+
+        final Position currentPosition = gameData.getAgentPosition();
+        PositionPath closest = null;
+        for (int y = 0; y < 32; y++) {
+            final Position position = this.lastSafePosition.setY(y);
+            if (!gameData.isPositionSafe(position) || !gameData.isPositionValid(position)) {
+                continue;
+            }
+
+            final PositionPath positionPath = new PositionPath(gameData, currentPosition, position);
+            if (positionPath.isEmpty()) {
+                continue;
+            }
+
+            if (closest == null) {
+                closest = positionPath;
+                continue;
+            }
+
+            if (closest.getNeededSteps() > positionPath.getNeededSteps()) {
+                closest = positionPath;
+            }
+        }
+
+        System.out.println("Found closest safe position path: " + closest);
+        return closest;
+    }
+
+    private Position getRandomClose(GameData gameData, Position origin, int maxDistance) {
+        for (int i = 0; i < 20; i++) {
+            final int dx = ThreadLocalRandom.current().nextInt(-maxDistance, maxDistance + 1);
+            final int dy = ThreadLocalRandom.current().nextInt(-maxDistance, maxDistance + 1);
+            if (dx == 0 && dy == 0) {
+                continue;
+            }
+
+            final Position candidate = new Position(origin.x() + dx, origin.y() + dy);
+            if (!gameData.isPositionValid(candidate) || !gameData.isPositionSafe(candidate)) {
+                continue;
+            }
+
+            // Don't stay at direct spawn
+            if (candidate.x() > gameData.getSpawnThreshold()) {
+                continue;
+            }
+
+            final int distance = this.getDistance(origin, candidate);
+            if (distance == -1 || distance > maxDistance) {
+                continue;
+            }
+
+            return candidate;
+        }
+
+        return null;
     }
 }

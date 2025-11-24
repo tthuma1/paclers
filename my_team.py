@@ -57,10 +57,11 @@ class CustomUniversalAgent(CaptureAgent):
 
     def create_data(self, actions, game_state):
         return {
-            "legalActions": actions,
+            "legal_actions": actions,
             "position": game_state.get_agent_position(self.index),
             "score": self.get_score(game_state),
             "food": self.get_food(game_state).as_list(),
+            "defending_food": self.get_food_you_are_defending(game_state).as_list(),
             "enemies": [
                 {
                     "pos": s.get_position(),
@@ -76,4 +77,7 @@ class CustomUniversalAgent(CaptureAgent):
         }
 
     def get_maze_distance(self, pos1, pos2):
-        return super().get_maze_distance(pos1, pos2)
+        try:
+            return super().get_maze_distance(pos1, pos2)
+        except Exception as e:
+            return -1
