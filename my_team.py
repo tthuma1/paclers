@@ -4,13 +4,12 @@ import threading
 import requests
 
 import agent_bridge
-import flask_server  # if you moved Flask to a separate file
+import flask_server
 from contest.capture_agents import CaptureAgent
 
 threading.Thread(target=flask_server.start_flask, daemon=True).start()
 
-
-def create_team(first_index, second_index, is_red, first='DummyAgent', second='CustomUniversalAgent', num_training=0):
+def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent', num_training=0):
     return [eval(first)(first_index), eval(second)(second_index)]
 
 
@@ -25,10 +24,19 @@ class DummyAgent(CaptureAgent):
 
 
 class CustomUniversalAgent(CaptureAgent):
+
     def __init__(self, index, time_for_computing=.1):
         super().__init__(index, time_for_computing)
         self.start = None
-        agent_bridge.agent_instance = self
+        self.move_count = 0
+        self.agent_index = agent_bridge.agent_index
+        agent_bridge.agent_instance[self.agent_index] = self
+        agent_bridge.agent_index += 1
+
+        print(agent_bridge.agent_index, agent_bridge.agent_instance)
+
+    def final(self, game_state):
+        print("Agent ", self.agent_index, " made ", self.move_count, " moves")
 
     def register_initial_state(self, game_state):
         self.start = game_state.get_agent_position(self.index)
@@ -42,10 +50,11 @@ class CustomUniversalAgent(CaptureAgent):
             response = requests.post(
                 "http://localhost:8080/choose_action",
                 json=data,
-                timeout=0.05
+                timeout=2.00
             )
 
-            java_action = response.text.strip()
+            self.move_count += 1
+            java_action = response.json()["response"].strip()
             if java_action in actions:
                 print("Received action: ", java_action)
                 return java_action
@@ -57,6 +66,7 @@ class CustomUniversalAgent(CaptureAgent):
 
     def create_data(self, actions, game_state):
         return {
+            "agent_index": self.agent_index,
             "legal_actions": actions,
             "position": game_state.get_agent_position(self.index),
             "score": self.get_score(game_state),

@@ -4,8 +4,11 @@ import com.google.gson.Gson;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import data.GameData;
+import entity.connection.request.PythonRequest;
+import entity.connection.response.MoveResponse;
 import entity.Position;
 import enums.Direction;
+import enums.GameState;
 import enums.Request;
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -19,25 +22,25 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Interpreter {
-    private final GameInterpreter interpreter;
-    private final HttpServer server;
+    private final Map<Integer, GameInterpreter> agents = new ConcurrentHashMap<>();
     private final Map<Request, URL> endpoints = new ConcurrentHashMap<>();
 
     public static final Gson GSON = new Gson();
     private static final String BASE_URL = "http://127.0.0.1:5001/%s"; // Flask listening on 5001
 
     public Interpreter() throws Exception {
-        this.server = HttpServer.create(new InetSocketAddress(8080), 0);
-        this.server.createContext("/choose_action", this::handleMove);
-        this.server.setExecutor(null);
-        this.server.start();
+        final HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
+        server.createContext("/choose_action", this::handleMove);
+        server.setExecutor(null);
+        server.start();
 
         for (final Request request : Request.values()) {
             final URL url = new URL(BASE_URL.formatted(request.getIdentifier()));
             this.endpoints.put(request, url);
         }
 
-        this.interpreter = new GameInterpreter(this);
+        this.agents.put(0, new GameInterpreter(this, 0, GameState.FINDING_FOOD));
+        this.agents.put(1, new GameInterpreter(this, 1, GameState.DEFENDING));
         System.out.println("Java Agent Server running on port 8080...");
     }
 
@@ -50,11 +53,13 @@ public class Interpreter {
             try (InputStream body = exchange.getRequestBody()) {
                 final String requestJson = new String(body.readAllBytes(), StandardCharsets.UTF_8);
                 final GameData gameData = GSON.fromJson(requestJson, GameData.class);
-                final Direction response = this.interpreter.handleMove(gameData);
+                final GameInterpreter interpreter = this.agents.get(gameData.getAgentIndex());
+
+                final Direction response = interpreter.handleMove(gameData);
                 final Position current = gameData.getAgentPosition();
 
                 //System.out.println("Move: " + response + " (current=" + current + ", next=" + response.applyModifier(current) + ")");
-                this.sendResponse(exchange, response.toString());
+                this.sendResponse(exchange, GSON.toJson(new MoveResponse(gameData.getAgentIndex(), response.toString())));
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -62,11 +67,13 @@ public class Interpreter {
     }
 
     private void sendResponse(HttpExchange exchange, String gson) {
-        try {
-            exchange.sendResponseHeaders(200, gson.length());
-            OutputStream os = exchange.getResponseBody();
-            os.write(gson.getBytes(StandardCharsets.UTF_8));
-            os.flush();
+        try (exchange) {
+            final byte[] bytes = gson.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, 0);
+
+            try (final OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
         } catch (Exception e) {
             System.out.println("Failed to respond for gson: " + gson);
             e.printStackTrace();
@@ -85,10 +92,11 @@ public class Interpreter {
         return true;
     }
 
-    public <T> T callPython(Request request, Object payload) {
+    public <T> T callPython(int agentId, Request request, Object payload) {
         try {
             final HttpURLConnection connection = this.createConnection(request);
-            final String json = GSON.toJson(payload);
+            final PythonRequest pythonRequest = new PythonRequest(agentId, payload);
+            final String json = GSON.toJson(pythonRequest);
 
             try (OutputStream os = connection.getOutputStream()) {
                 os.write(json.getBytes(StandardCharsets.UTF_8));

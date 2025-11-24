@@ -1,1 +1,2 @@
-agent_instance = None
+agent_index = 0
+agent_instance = [None, None]

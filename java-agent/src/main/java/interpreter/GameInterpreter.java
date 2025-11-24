@@ -5,7 +5,7 @@ import data.gson.EnemyData;
 import entity.Pair;
 import entity.Position;
 import entity.PositionPath;
-import entity.request.DistanceRequest;
+import entity.connection.request.DistanceRequest;
 import enums.Direction;
 import enums.GameState;
 import enums.Request;
@@ -19,10 +19,11 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 
 public class GameInterpreter {
+    private final int agentId;
     private final Interpreter interpreter;
     private final Map<GameState, Consumer<GameData>> registeredGameStates;
 
-    private GameState gameState = GameState.FINDING_FOOD;
+    private GameState gameState;
     private GameState previousGameState;
     private GameData previousData;
     private PositionPath positionPath;
@@ -32,8 +33,10 @@ public class GameInterpreter {
     private Position previousFoodPosition;
     private int collectedFood;
 
-    public GameInterpreter(Interpreter interpreter) {
+    public GameInterpreter(Interpreter interpreter, int agentId, GameState initialState) {
         this.interpreter = interpreter;
+        this.agentId = agentId;
+        this.gameState = initialState;
 
         this.registeredGameStates = new ConcurrentHashMap<>() {{
             this.put(GameState.FINDING_FOOD, GameInterpreter.this::handleFindingFood);
@@ -55,10 +58,15 @@ public class GameInterpreter {
 
     private void setPositionPath(PositionPath positionPath, String reason) {
         this.positionPath = positionPath;
-        System.out.println("Set new position with reason '" + reason + "'");
+        System.out.println("[" + this.agentId + "] Set new position with reason '" + reason + "'");
     }
 
     public Direction handleMove(GameData gameData) {
+        //if (this.agentId != gameData.getAgentIndex()) {
+        //    return null;
+        //}
+
+        System.out.println("Calling for agent id '" + this.agentId + "' (game data agent id: " + gameData.getAgentIndex() + ")");
         final List<Direction> legalMoves = gameData.getLegalDirections();
         final Position currentPosition = gameData.getAgentPosition();
         if (this.startingPosition == null) {
@@ -86,7 +94,6 @@ public class GameInterpreter {
             if (nextStep != null) {
                 final Direction move = Direction.fromPosition(currentPosition, nextStep);
                 if (move != null && legalMoves.contains(move)) {
-
                     this.previousPosition = currentPosition;
                     this.previousData = gameData;
                     return move;
@@ -105,23 +112,9 @@ public class GameInterpreter {
 
     private void handleFindingFood(GameData gameData) {
         final int remainingFood = gameData.getFoodPositions().size();
-        final int remainingDefendingFood = gameData.getDefendingFoodPositions().size();
-
         final Pair<Position, Integer> closestFoodEntry = this.getClosestFood(gameData);
         if (this.gameState != GameState.FINDING_FOOD && this.gameState != GameState.DEPOSITING_FOOD) {
             return;
-        }
-
-        // When we're winning, and we have more food than the enemy, move to defense
-        // TODO: Currently just start defending once we have some points
-        if (gameData.getScore() > 0 && gameData.isPositionSafe(gameData.getAgentPosition()) /*&& remainingDefendingFood > remainingFood*/) {
-            if (this.registeredGameStates.containsKey(GameState.DEFENDING)) {
-                //this.registeredGameStates.remove(GameState.FINDING_FOOD);
-                //this.registeredGameStates.remove(GameState.DEPOSITING_FOOD);
-
-                this.setGameState(GameState.DEFENDING);
-                return;
-            }
         }
 
         if (remainingFood == 0 && (this.positionPath == null || this.positionPath.isCompleted())) {
@@ -193,7 +186,7 @@ public class GameInterpreter {
             return;
         }
 
-        final EnemyData validEnemy = this.getValidDefensiveEnemy(gameData, currentPosition);
+        final EnemyData validEnemy = this.getValidDefensiveEnemy(gameData, currentPosition, 3);
         if (validEnemy == null || this.gameState == GameState.FLEEING) {
             return;
         }
@@ -225,12 +218,25 @@ public class GameInterpreter {
 
         // Already have an active goal
         if (this.positionPath != null && !this.positionPath.isCompleted()) {
+            final EnemyData updatedEnemyData = this.getValidOffensiveEnemy(gameData);
+            // We still have a valid enemy
+            if (updatedEnemyData != null) {
+                final PositionPath updatedPath = new PositionPath(gameData, currentPosition, updatedEnemyData.getPosition());
+                final Position currentPathPosition = this.positionPath.getGoal();
+                final Position updatedPathPosition = this.positionPath.getGoal();
+                final int originalDistance = currentPosition.distance(currentPathPosition);
+                final int updatedDistance = currentPosition.distance(updatedPathPosition);
+
+                // We want to move closer to the enemy
+                if (updatedDistance < originalDistance) {
+                    this.setPositionPath(updatedPath, "Moving to chase");
+                }
+            }
+
             return;
         }
 
         final EnemyData nearbyEnemy = this.getValidOffensiveEnemy(gameData);
-        System.out.println("Nearby enemy in home territory: " + nearbyEnemy);
-
         if (nearbyEnemy != null) {
             final PositionPath pathToEnemy = new PositionPath(gameData, currentPosition, nearbyEnemy.getPosition());
             this.setPositionPath(pathToEnemy, "Chasing enemy in home territory");
@@ -247,10 +253,21 @@ public class GameInterpreter {
     }
 
     private void handleAttacking(GameData gameData) {
+        if (this.gameState != GameState.ATTACKING) {
+            return;
+        }
 
+        final Position currentPosition = gameData.getAgentPosition();
+        final EnemyData closestEnemy = this.getValidDefensiveEnemy(gameData, currentPosition, 15);
+        if (closestEnemy == null) {
+            this.setGameState(GameState.DEFENDING);
+            return;
+        }
+
+        this.setPositionPath(new PositionPath(gameData, currentPosition, closestEnemy.getPosition()), "Attacking enemy in home territory");
     }
 
-    private EnemyData getValidDefensiveEnemy(GameData gameData, Position currentPosition) {
+    private EnemyData getValidDefensiveEnemy(GameData gameData, Position currentPosition, int distanceThreshold) {
         final List<EnemyData> enemies = gameData.getEnemies();
         for (final EnemyData enemy : enemies) {
             final Position enemyPosition = enemy.getPosition();
@@ -261,7 +278,7 @@ public class GameInterpreter {
 
             final int distance = this.getDistance(currentPosition, enemyPosition);
             // If it's more than 3 squares away, ignore it
-            if (distance > 3) {
+            if (distance > distanceThreshold) {
                 continue;
             }
 
@@ -318,7 +335,8 @@ public class GameInterpreter {
             mappedPositions.put(position, distance);
         }
 
-        final Optional<Map.Entry<Position, Integer>> closest = mappedPositions.entrySet().stream().min(Comparator.comparingInt(Map.Entry::getValue));
+        final Optional<Map.Entry<Position, Integer>> closest = mappedPositions.entrySet()
+            .stream().min(Comparator.comparingInt(Map.Entry::getValue));
         if (closest.isEmpty()) {
             return null;
         }
@@ -329,7 +347,7 @@ public class GameInterpreter {
 
     private int getDistance(Position first, Position second) {
         final DistanceRequest request = new DistanceRequest(first, second);
-        final Integer distance = this.interpreter.callPython(Request.DISTANCE_REQUEST, request);
+        final Integer distance = this.interpreter.callPython(this.agentId, Request.DISTANCE_REQUEST, request);
         return distance == null ? -1 : distance;
     }
 
@@ -366,14 +384,14 @@ public class GameInterpreter {
     }
 
     private Position getRandomClose(GameData gameData, Position origin, int maxDistance) {
-        for (int i = 0; i < 20; i++) {
-            final int dx = ThreadLocalRandom.current().nextInt(-maxDistance, maxDistance + 1);
-            final int dy = ThreadLocalRandom.current().nextInt(-maxDistance, maxDistance + 1);
-            if (dx == 0 && dy == 0) {
+        final List<Position> emptySpaces = gameData.getEmptySpaces();
+
+        for (int i = 0; i < 50; i++) {
+            final Position candidate = emptySpaces.get(ThreadLocalRandom.current().nextInt(emptySpaces.size()));
+            if (candidate.equals(origin)) {
                 continue;
             }
 
-            final Position candidate = new Position(origin.x() + dx, origin.y() + dy);
             if (!gameData.isPositionValid(candidate) || !gameData.isPositionSafe(candidate)) {
                 continue;
             }

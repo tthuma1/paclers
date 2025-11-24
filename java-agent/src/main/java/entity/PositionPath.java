@@ -28,6 +28,10 @@ public class PositionPath {
         return this.positions.size();
     }
 
+    public Position getGoal() {
+        return this.positions.get(this.positions.size() - 1);
+    }
+
     public int getCurrentStepIndex() {
         return this.currentStep;
     }

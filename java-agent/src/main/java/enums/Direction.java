@@ -23,6 +23,8 @@ public enum Direction {
     public static Direction fromPosition(Position from, Position to) {
         for (Direction direction : Direction.VALUES) {
             final Position directional = direction.applyModifier(from);
+            System.out.println("Direction: " + direction + ", Directional: " + directional);
+
             if (directional.equals(to)) {
                 return direction;
             }

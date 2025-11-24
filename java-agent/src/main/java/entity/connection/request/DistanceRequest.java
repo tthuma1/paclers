@@ -1,4 +1,4 @@
-package entity.request;
+package entity.connection.request;
 
 import entity.Position;
 
