@@ -38,20 +38,18 @@ public class GameInterpreter {
         this.agentId = agentId;
         this.gameState = initialState;
 
+        // TODO: Have a separate goal list which sorts them from current state based on likely-hood of occurrence
         this.registeredGameStates = new ConcurrentHashMap<>() {{
             this.put(GameState.FINDING_FOOD, GameInterpreter.this::handleFindingFood);
             this.put(GameState.DEPOSITING_FOOD, GameInterpreter.this::handleDepositFood);
-            this.put(GameState.FLEEING, GameInterpreter.this::handleFleeing);
+            this.put(GameState.OFFENSIVE_FLEEING, GameInterpreter.this::handleOffensiveFleeing);
+            this.put(GameState.DEFENSIVE_FLEEING, GameInterpreter.this::handleDefensiveFleeing);
             this.put(GameState.DEFENDING, GameInterpreter.this::handleDefending);
             this.put(GameState.ATTACKING, GameInterpreter.this::handleAttacking);
         }};
     }
 
     private void setGameState(GameState gameState) {
-        if (!this.registeredGameStates.containsKey(gameState)) {
-            return;
-        }
-
         this.previousGameState = this.gameState;
         this.gameState = gameState;
     }
@@ -62,11 +60,6 @@ public class GameInterpreter {
     }
 
     public Direction handleMove(GameData gameData) {
-        //if (this.agentId != gameData.getAgentIndex()) {
-        //    return null;
-        //}
-
-        System.out.println("Calling for agent id '" + this.agentId + "' (game data agent id: " + gameData.getAgentIndex() + ")");
         final List<Direction> legalMoves = gameData.getLegalDirections();
         final Position currentPosition = gameData.getAgentPosition();
         if (this.startingPosition == null) {
@@ -177,17 +170,26 @@ public class GameInterpreter {
         this.setGameState(GameState.FINDING_FOOD);
     }
 
-    private void handleFleeing(GameData gameData) {
+    private void handleOffensiveFleeing(GameData gameData) {
         final Position currentPosition = gameData.getAgentPosition();
-        if (this.gameState == GameState.FLEEING) {
-            if (this.positionPath == null) {
-                this.setGameState(this.previousGameState);
-            }
+        // If we're currently fleeing, and our path has ended, set it back to previous goal
+        if (this.gameState == GameState.OFFENSIVE_FLEEING && this.positionPath == null) {
+            this.setGameState(this.previousGameState);
             return;
         }
 
+        // Find an enemy closer than 4 moves on the offensive territory
         final EnemyData validEnemy = this.getValidDefensiveEnemy(gameData, currentPosition, 3);
-        if (validEnemy == null || this.gameState == GameState.FLEEING) {
+
+        // If we found a valid enemy, and we're a pacman, switch to attacking // TODO: Other agent should probably become agressive as well to collect as much food as possible
+        if (validEnemy != null && !validEnemy.isPacman() && gameData.isPacman()) {
+            this.setPositionPath(new PositionPath(gameData, currentPosition, validEnemy.getPosition()), "Pursuing enemy due to becoming pacman");
+            this.setGameState(GameState.ATTACKING);
+            return;
+        }
+
+        // If we have no enemy, or are already pursuing an active goal, skip other checking
+        if (validEnemy == null || this.gameState == GameState.OFFENSIVE_FLEEING) {
             return;
         }
 
@@ -201,7 +203,29 @@ public class GameInterpreter {
             this.setPositionPath(closestSafe, "Enemy found, fleeing");
         }
 
-        this.setGameState(GameState.FLEEING);
+        this.setGameState(GameState.OFFENSIVE_FLEEING);
+    }
+
+    private void handleDefensiveFleeing(GameData gameData) {
+        // If we're currently fleeing, and our path has ended, set it back to previous goal
+        if (this.gameState == GameState.DEFENSIVE_FLEEING && this.positionPath == null) {
+            this.setGameState(this.previousGameState);
+            return;
+        }
+
+        // Find an enemy closer than 4 moves on the offensive territory
+        final EnemyData validEnemy = this.getValidOffensiveEnemy(gameData);
+        if (validEnemy == null || !validEnemy.isPacman()) {
+            return;
+        }
+
+        // TODO: Find the enemies path and avoid it
+        final PositionPath closestSafe = this.getClosestSafePosition(gameData);
+        if (closestSafe != null) {
+            this.setPositionPath(closestSafe, "Enemy found, fleeing");
+        }
+
+        this.setGameState(GameState.DEFENSIVE_FLEEING);
     }
 
     private void handleDefending(GameData gameData) {
@@ -228,9 +252,9 @@ public class GameInterpreter {
                 final int updatedDistance = currentPosition.distance(updatedPathPosition);
 
                 // We want to move closer to the enemy
-                if (updatedDistance < originalDistance) {
-                    this.setPositionPath(updatedPath, "Moving to chase");
-                }
+                //if (updatedDistance < originalDistance) {
+                this.setPositionPath(updatedPath, "Moving to chase");
+                //}
             }
 
             return;

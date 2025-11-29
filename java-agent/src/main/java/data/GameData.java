@@ -13,6 +13,7 @@ public class GameData {
     @SerializedName("legal_actions")
     private List<String> legalActions;
     private List<Integer> position;
+    private boolean pacman;
     private int score;
     private List<List<Integer>> food;
     @SerializedName("defending_food")
@@ -65,6 +66,10 @@ public class GameData {
 
     public Position getAgentPosition() {
         return new Position(this.position.get(0), this.position.get(1));
+    }
+
+    public boolean isPacman() {
+        return this.pacman;
     }
 
     public List<Position> getFoodPositions() {

@@ -69,6 +69,7 @@ class CustomUniversalAgent(CaptureAgent):
             "agent_index": self.agent_index,
             "legal_actions": actions,
             "position": game_state.get_agent_position(self.index),
+            "pacman": game_state.get_agent_state(self.index).is_pacman,
             "score": self.get_score(game_state),
             "food": self.get_food(game_state).as_list(),
             "defending_food": self.get_food_you_are_defending(game_state).as_list(),

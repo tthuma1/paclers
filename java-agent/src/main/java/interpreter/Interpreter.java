@@ -39,7 +39,7 @@ public class Interpreter {
             this.endpoints.put(request, url);
         }
 
-        this.agents.put(0, new GameInterpreter(this, 0, GameState.FINDING_FOOD));
+        //this.agents.put(0, new GameInterpreter(this, 0, GameState.FINDING_FOOD));
         this.agents.put(1, new GameInterpreter(this, 1, GameState.DEFENDING));
         System.out.println("Java Agent Server running on port 8080...");
     }
@@ -54,6 +54,9 @@ public class Interpreter {
                 final String requestJson = new String(body.readAllBytes(), StandardCharsets.UTF_8);
                 final GameData gameData = GSON.fromJson(requestJson, GameData.class);
                 final GameInterpreter interpreter = this.agents.get(gameData.getAgentIndex());
+                if (interpreter == null) {
+                    this.sendResponse(exchange, GSON.toJson(new MoveResponse(gameData.getAgentIndex(), Direction.STOP.toString())));
+                }
 
                 final Direction response = interpreter.handleMove(gameData);
                 final Position current = gameData.getAgentPosition();
