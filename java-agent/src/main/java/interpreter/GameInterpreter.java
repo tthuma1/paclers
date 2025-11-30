@@ -30,7 +30,6 @@ public class GameInterpreter {
     private Position lastSafePosition;
     private Position startingPosition;
     private Position previousPosition;
-    private Position previousFoodPosition;
     private int collectedFood;
 
     public GameInterpreter(Interpreter interpreter, int agentId, GameState initialState) {
@@ -137,7 +136,6 @@ public class GameInterpreter {
 
         final Position closestFood = closestFoodEntry.getFirst();
         this.setPositionPath(new PositionPath(gameData, currentPosition, closestFood), "New food found (" + closestFood + ")");
-        this.previousFoodPosition = closestFood;
     }
 
     private void handleDepositFood(GameData gameData) {
@@ -173,7 +171,7 @@ public class GameInterpreter {
     private void handleOffensiveFleeing(GameData gameData) {
         final Position currentPosition = gameData.getAgentPosition();
         // If we're currently fleeing, and our path has ended, set it back to previous goal
-        if (this.gameState == GameState.OFFENSIVE_FLEEING && this.positionPath == null) {
+        if (this.gameState == GameState.OFFENSIVE_FLEEING && (this.positionPath == null || this.positionPath.isCompleted())) {
             this.setGameState(this.previousGameState);
             return;
         }
@@ -244,17 +242,9 @@ public class GameInterpreter {
         if (this.positionPath != null && !this.positionPath.isCompleted()) {
             final EnemyData updatedEnemyData = this.getValidOffensiveEnemy(gameData);
             // We still have a valid enemy
-            if (updatedEnemyData != null) {
+            if (updatedEnemyData != null && !updatedEnemyData.isPacman()) {
                 final PositionPath updatedPath = new PositionPath(gameData, currentPosition, updatedEnemyData.getPosition());
-                final Position currentPathPosition = this.positionPath.getGoal();
-                final Position updatedPathPosition = this.positionPath.getGoal();
-                final int originalDistance = currentPosition.distance(currentPathPosition);
-                final int updatedDistance = currentPosition.distance(updatedPathPosition);
-
-                // We want to move closer to the enemy
-                //if (updatedDistance < originalDistance) {
                 this.setPositionPath(updatedPath, "Moving to chase");
-                //}
             }
 
             return;
@@ -284,7 +274,8 @@ public class GameInterpreter {
         final Position currentPosition = gameData.getAgentPosition();
         final EnemyData closestEnemy = this.getValidDefensiveEnemy(gameData, currentPosition, 15);
         if (closestEnemy == null) {
-            this.setGameState(GameState.DEFENDING);
+            // Reset game state instead
+            this.setGameState(this.previousGameState);
             return;
         }
 
@@ -349,18 +340,12 @@ public class GameInterpreter {
     private Pair<Position, Integer> getClosestFood(GameData gameData) {
         final Position agentPosition = gameData.getAgentPosition();
         final Map<Position, Integer> mappedPositions = new HashMap<>();
-
         for (final Position position : gameData.getFoodPositions()) {
-            if (this.previousFoodPosition != null && this.previousFoodPosition.equals(position)) {
-                continue; // If we've already targeted this position, move to a different one instead
-            }
-
             final int distance = this.getDistance(agentPosition, position);
             mappedPositions.put(position, distance);
         }
 
-        final Optional<Map.Entry<Position, Integer>> closest = mappedPositions.entrySet()
-            .stream().min(Comparator.comparingInt(Map.Entry::getValue));
+        final Optional<Map.Entry<Position, Integer>> closest = mappedPositions.entrySet().stream().min(Comparator.comparingInt(Map.Entry::getValue));
         if (closest.isEmpty()) {
             return null;
         }
