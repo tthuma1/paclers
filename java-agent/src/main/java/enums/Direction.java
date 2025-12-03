@@ -51,8 +51,6 @@ public enum Direction {
             index++;
         }
 
-
         return builder.toString();
     }
-
 }
