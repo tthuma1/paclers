@@ -61,7 +61,8 @@ class CustomUniversalAgent(CaptureAgent):
             [
                 {
                     "pos": s.get_position(),
-                    "isPacman": s.is_pacman
+                    "isPacman": s.is_pacman,
+                    "scaredTimer": s.scared_timer
                 }
                 for s in [game_state.get_agent_state(i) for i in self.get_opponents(game_state)]
             ],
@@ -192,13 +193,13 @@ class GameInterpreter:
                 FindingFoodGoal(self),
                 DepositingFoodGoal(self),
                 OffensiveFleeingGoal(self),
-                AttackingGoal(self)
+                AttackingGoal(self),
+                CapsuleFindGoal(self)
             ]
         else:
             self.path_color = format_color(0.4, 0.4, 0)
             initial_state = GameState.DEFENDING
             allowed_goals = [
-                AttackingGoal(self),
                 DefendingGoal(self),
                 DefensiveFleeingGoal(self)
             ]
@@ -218,11 +219,11 @@ class GameInterpreter:
         else:
             print("[", self.agent_index, "] Set new position with reason ", reason)
     
-        if self.position_path is not None:
-            self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))        
+        #if self.position_path is not None:
+        #    self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
         
-        if path is not None:
-            self.display_path(path.positions, self.path_color)
+        #if path is not None:
+        #    self.display_path(path.positions, self.path_color)
         
         self.position_path = path
         
@@ -264,6 +265,9 @@ class GameInterpreter:
             self.capsule = self.game_data.capsule
 
         if self.game_data.capsule.position is not None:
+            return
+
+        if self.get_distance(self.capsule.position, self.game_data.current_position) > 2:
             return
 
         if self.capsule.capsule_active_time <= 0:
@@ -489,7 +493,7 @@ class FindingFoodGoal(AgentGoal):
         if is_food_square:
             self.parent.collected_food += 1
 
-        if self.parent.collected_food >= 5 and self.parent.game_state is not GameState.DEPOSITING_FOOD and (closest_food_entry is not None and closest_food_entry[1] >= 2):
+        if self.parent.collected_food >= 5 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (closest_food_entry is not None and closest_food_entry[1] >= 2):
             self.parent.set_game_state(GameState.DEPOSITING_FOOD)
             return "Collected at least 5 food, returning home to deposit"
 
@@ -556,7 +560,7 @@ class OffensiveFleeingGoal(AgentGoal):
         if valid_enemy is None or self.parent.game_state is GameState.OFFENSIVE_FLEEING or self.parent.game_state is GameState.DEFENDING:
             return "No valid enemy found (second)"
 
-        if self.parent.encounter_counter >= 5:
+        if self.parent.encounter_counter >= 2:
             random_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
 
             self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position), "Executed the same encounter 10 times, moving to a random position")
@@ -646,9 +650,6 @@ class AttackingGoal(AgentGoal):
 
     @override
     def compute(self):
-        # if self.parent.game_state is not GameState.ATTACKING:
-        #     return "Different goal active"
-
         current_position = self.parent.game_data.current_position
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 4)
 
@@ -659,6 +660,10 @@ class AttackingGoal(AgentGoal):
 
         if valid_enemy is None:
             return "No valid enemy found"
+
+        if valid_enemy["scaredTimer"] <= 0:
+            self.parent.set_game_state(GameState.OFFENSIVE_FLEEING)
+            return "Found enemy that was already eaten, run"
         
         target_pos = Position.from_tuple(valid_enemy["pos"])
         self.parent.set_position_path(
@@ -670,7 +675,22 @@ class AttackingGoal(AgentGoal):
         return "Attacking visible enemy"
 
 
+class CapsuleFindGoal(AgentGoal):
+    @override
+    def compute(self):
+        if self.parent.game_state is GameState.FINDING_CAPSULE or self.parent.capsule.consumed:
+            return "Already finding capsule or eaten"
 
+        capsule_position = self.parent.capsule.position
+        current_position = self.parent.game_data.current_position
+        distance = self.parent.get_distance(capsule_position, current_position)
+
+        if distance <= 3:
+            self.parent.set_game_state(GameState.FINDING_CAPSULE)
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, capsule_position), "Moving to the capsule position")
+            return "Finding Capsule"
+
+        return "Capsule is not close enough, ignoring"
 
 class Position:
 
@@ -872,6 +892,7 @@ class Direction(Enum):
 
 class GameState(Enum):
     FINDING_FOOD = auto()
+    FINDING_CAPSULE = auto()
     DEPOSITING_FOOD = auto()
     OFFENSIVE_FLEEING = auto()  # When we're on the opponents side
     DEFENSIVE_FLEEING = auto()  # When we're on home territory
