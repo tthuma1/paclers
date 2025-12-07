@@ -105,11 +105,24 @@ class Capsule:
         for capsule in capsules:
             capsule_position = Position.from_tuple(capsule)
 
-            if not color.is_position_on_safe_side(capsule_position):
+            if color.is_position_on_safe_side(capsule_position):
                 continue
 
             self.position = capsule_position
             break
+
+    def eat_capsule(self, interpreter):
+        self.consumed = True
+        interpreter.set_game_state(GameState.ATTACKING)
+        print("capsule was eaten")
+
+    def decrease_time(self, interpreter):
+        self.capsule_active_time -= 1
+        print("Time decreased to", self.capsule_active_time)
+
+        if self.capsule_active_time <= 0:
+            interpreter.set_game_state(interpreter.previous_game_state)
+            print("Nazaj na prej")
 
 class AgentColor:
 
@@ -121,7 +134,7 @@ class AgentColor:
 
     def get_defensive_treshold(self):
         return None
-    
+
     def get_spawn_treshold(self):
         return None
 
@@ -169,6 +182,7 @@ class GameInterpreter:
         self.previous_position = None
         self.collected_food = 0
         self.encounter_counter = 0
+        self.capsule = None
 
         if self.agent_index == 0:
             initial_state = GameState.FINDING_FOOD
@@ -181,6 +195,8 @@ class GameInterpreter:
         else:
             initial_state = GameState.DEFENDING
             allowed_goals = [
+                AttackingGoal(self),
+                WanderGoal(self),
                 DefendingGoal(self),
                 DefensiveFleeingGoal(self)
             ]
@@ -240,20 +256,23 @@ class GameInterpreter:
         self.previous_position = None
         self.previous_game_data = None
         self.collected_food = 0
-
+        
     def handle_capsule_state(self):
-        current_position = self.game_data.current_position
-        capsule_position = self.game_data.capsule.position
+        if self.capsule is None:
+            self.capsule = self.game_data.capsule
 
-        # Capsule was already consumed
-        if self.game_data.capsule.consumed or self.game_data.capsule.position is None:
+        if self.game_data.capsule.position is not None:
             return
 
-        if not current_position.__eq__(capsule_position):
+        if self.capsule.capsule_active_time <= 0:
             return
 
-        self.game_data.capsule.consumed = True
-        # print("Consumed capsule at ", current_position)
+        if not self.capsule.consumed:
+            self.capsule.eat_capsule(self)
+            return
+
+        self.capsule.decrease_time(self)
+
 
     def get_distance(self, from_position, to_position):
         if from_position.x > 32 and to_position.x > 32 and from_position.y < 0 and to_position.y < 0:
@@ -450,8 +469,11 @@ class FindingFoodGoal(AgentGoal):
         current_position = self.parent.game_data.current_position
         closest_food_entry = self.parent.get_closest_food(current_position, self.parent.game_data.food_positions)
 
-        if self.parent.game_state is not GameState.FINDING_FOOD and self.parent.game_state is not GameState.DEPOSITING_FOOD:
+        if self.parent.game_state is not GameState.FINDING_FOOD and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING:
             return "Different goal active"
+
+        if self.parent.game_state is GameState.ATTACKING and self.parent.position_path is not None:
+            return "Attacking an enemy already"
 
         if len(remaining_food) == 0 and (self.parent.position_path is None or self.parent.position_path.is_completed()):
             closest_safe = self.parent.get_closest_safe_position(current_position)
@@ -508,6 +530,9 @@ class OffensiveFleeingGoal(AgentGoal):
 
     @override
     def compute(self):
+        if self.parent.game_state is GameState.ATTACKING:
+            return "Attacking, no need to flee"
+
         current_position = self.parent.game_data.current_position
 
         if self.parent.game_state is GameState.OFFENSIVE_FLEEING and (self.parent.position_path is None or self.parent.position_path.is_completed()):
@@ -521,7 +546,7 @@ class OffensiveFleeingGoal(AgentGoal):
         # TODO: This is incorrect
         # if valid_enemy is not None and not valid_enemy["isPacman"] and self.parent.game_data.is_pacman:
         #     print("Enemy: ", valid_enemy, " Are we a pacman?: ", self.parent.game_data.is_pacman)
-        #
+#
         #     self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(valid_enemy["pos"])), "Pursuing enemy due to becoming a pacman")
         #     self.parent.set_game_state(GameState.ATTACKING)
         #     return "Switching to attack enemy as we've become a pacman"
@@ -529,7 +554,7 @@ class OffensiveFleeingGoal(AgentGoal):
         if valid_enemy is None or self.parent.game_state is GameState.OFFENSIVE_FLEEING or self.parent.game_state is GameState.DEFENDING:
             return "No valid enemy found (second)"
 
-        if self.parent.encounter_counter >= 10:
+        if self.parent.encounter_counter >= 5:
             random_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
 
             self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position), "Executed the same encounter 10 times, moving to a random position")
@@ -624,24 +649,26 @@ class AttackingGoal(AgentGoal):
 
         current_position = self.parent.game_data.current_position
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 4)
-        # print("[", self.parent.agent_index, "]", valid_enemy)
 
-        if valid_enemy is not None and valid_enemy["isPacman"]:
-            self.parent.set_game_state(self.parent.previous_game_state)
-            return "Valid enemy is a pacman, setting to previous goal"
+        print("[", self.parent.agent_index, "]", valid_enemy)
+
+        if self.parent.game_state is not GameState.ATTACKING:
+            return "Not attacking"
 
         if valid_enemy is None:
             return "No valid enemy found"
+        
+        target_pos = Position.from_tuple(valid_enemy["pos"])
+        self.parent.set_position_path(
+            PositionPath(self.parent.game_data, current_position, target_pos),
+            "Attacking visible enemy"
+        )
 
-        if not valid_enemy["isPacman"]:
-            return "Valid enemy is not a pacman"
+        print("Attacking visible enemy")
+        return "Attacking visible enemy"
 
-        # TODO: Reset if we find a change in the conditions
-        if self.parent.game_state is GameState.ATTACKING:
-            return "Already actively attacking a target"
 
-        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(valid_enemy["pos"])), "Attacking enemy in home territory")
-        return "Valid enemy found, attacking in home territory"
+
 
 class Position:
 
@@ -652,6 +679,9 @@ class Position:
     def __init__(self, x, y):
         self.x = x
         self.y = y
+
+    def clone(self):
+        return Position(self.x, self.y)
 
     def distance(self, other):
         return abs(self.x - other.x) + abs(self.y - other.y)
