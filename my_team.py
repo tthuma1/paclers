@@ -5,10 +5,10 @@ from enum import Enum, auto
 from typing import override
 
 from contest.capture_agents import CaptureAgent
-from contest.graphics_utils import circle, format_color
+from contest.graphics_utils import circle, format_color, refresh
 
 
-def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent', num_training=1):
+def create_team(first_index, second_index, is_red, first='DummyAgent', second='CustomUniversalAgent', num_training=1):
     print("Agent 1: ", first_index, " Type: ", first)
     print("Agent 2: ", second_index, " Type: ", second)
 
@@ -115,15 +115,12 @@ class Capsule:
     def eat_capsule(self, interpreter):
         self.consumed = True
         interpreter.set_game_state(GameState.ATTACKING)
-        print("capsule was eaten")
 
     def decrease_time(self, interpreter):
         self.capsule_active_time -= 1
-        print("Time decreased to", self.capsule_active_time)
 
         if self.capsule_active_time <= 0:
             interpreter.set_game_state(interpreter.previous_game_state)
-            print("Nazaj na prej")
 
 class AgentColor:
 
@@ -210,7 +207,7 @@ class GameInterpreter:
         self.previous_game_state = self.game_state
         self.game_state = new_state
 
-        print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
+        #print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
 
     def set_position_path(self, path, reason):
         if path is not None:
@@ -218,19 +215,18 @@ class GameInterpreter:
         else:
             print("[", self.agent_index, "] Set new position with reason ", reason)
     
-        if self.position_path is not None:
-            self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))        
-        
-        if path is not None:
-            self.display_path(path.positions, self.path_color)
+        # if self.position_path is not None:
+        #     self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
+        # 
+        # if path is not None:
+        #     self.display_path(path.positions, self.path_color)
         
         self.position_path = path
         
     def display_path(self, positions, color):
         for position in positions:
             point = Position.to_tuple(position)
-
-            circle(self.parent.display.to_screen(point=point), 3,  outline_color=color, fill_color=color, width=1)
+            circle(self.parent.display.to_screen(point=point), 3,  outline_color=color, fill_color=format_color(0, 0, 0), width=1)
 
     def is_position_safe(self, position):
         if position is None:
@@ -319,7 +315,7 @@ class GameInterpreter:
 
         return closest_position, closest_distance
 
-    def get_closest_safe_position(self, current_position):
+    def get_closest_safe_position(self, current_position, restricted=set()):
         if self.last_safe_position is None:
             return None
 
@@ -330,7 +326,7 @@ class GameInterpreter:
             if not self.is_position_safe(position) or not self.is_position_valid(self.game_data.game_state, position):
                 continue
 
-            position_path = PositionPath(self.game_data, current_position, position)
+            position_path = PositionPath(self.game_data, current_position, position, restricted)
 
             if position_path.is_empty():
                 continue
@@ -611,24 +607,31 @@ class DefendingGoal(AgentGoal):
         if not self.parent.is_position_safe(current_position):
             self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, self.parent.last_safe_position), "Moving to defense")
 
+        nearby_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
+        if nearby_enemy is not None and (self.parent.position_path is None or not self.parent.position_path.is_completed()):
+            print("Nearby enemy: ", nearby_enemy)
+            
+            if not nearby_enemy["isPacman"]:
+                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(nearby_enemy["pos"])), "Chasing enemy in home territory")
+                return "Chasing enemy in home territory"
+
+            else:
+                print("nearby enemy is a pacman")
+    
+                restricted = [Position.from_tuple(nearby_enemy["pos"])]
+                closest_safe = self.parent.get_closest_safe_position(current_position, restricted)
+                
+                self.parent.set_position_path(closest_safe, "Fleeing from enemy")
+                return "Fleeing from the enemy in home territory"
+
         # Actively pursue enemy in home territory
         if self.parent.position_path is None or (self.parent.position_path is not None and not self.parent.position_path.is_completed()):
             updated_valid_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
 
-            if updated_valid_enemy is not None: #and not updated_valid_enemy["isPacman"]:
+            if updated_valid_enemy is not None and not updated_valid_enemy["isPacman"]:
                 self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(updated_valid_enemy["pos"])), "Updating chase position in home territory")
+                print("Chasing in home")
                 return "Updating chase position"
-
-        nearby_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
-        if nearby_enemy is not None:
-            if not nearby_enemy["isPacman"]:
-                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(nearby_enemy["pos"])), "Chasing enemy in home territory")
-                return "Chasing enemy in home territory"
-            #else:
-            #    # TODO: Find a random close position which moves away from the pursuing enemy
-            #    
-            #    self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, ))
-            #    return "Fleeing from the enemy in home territory"
 
         if self.parent.position_path is not None and not self.parent.position_path.is_completed():
             return "Already pursuing an active goal"
@@ -652,8 +655,6 @@ class AttackingGoal(AgentGoal):
         current_position = self.parent.game_data.current_position
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 4)
 
-        print("[", self.parent.agent_index, "]", valid_enemy)
-
         if self.parent.game_state is not GameState.ATTACKING:
             return "Not attacking"
 
@@ -666,7 +667,6 @@ class AttackingGoal(AgentGoal):
             "Attacking visible enemy"
         )
 
-        print("Attacking visible enemy")
         return "Attacking visible enemy"
 
 
@@ -714,10 +714,10 @@ class Position:
 
 
 class PositionPath:
-    def __init__(self, game_data, starting, ending):
+    def __init__(self, game_data, starting, ending, restricted=list()):
         self.origin = starting
         self.destination = ending
-        self.positions = self._generate_positions(game_data, starting, ending)
+        self.positions = self._generate_positions(game_data, starting, ending, restricted)
 
         if self.positions and self.positions[0] == starting:
             self.positions.pop(0)
@@ -750,7 +750,7 @@ class PositionPath:
         self.current_step += 1
         return pos
 
-    def _generate_positions(self, game_data, start, end):
+    def _generate_positions(self, game_data, start, end, restricted):
         walls = set(game_data.walls)
         result = []
 
@@ -775,6 +775,9 @@ class PositionPath:
 
             for neighbor_pos in self._get_neighbors(current.position):
                 if Position.to_tuple(neighbor_pos) in walls or neighbor_pos in closed:
+                    continue
+
+                if neighbor_pos in restricted:
                     continue
 
                 g = current.g_cost + 1
@@ -803,6 +806,12 @@ class PositionPath:
 
     @staticmethod
     def _manhattan(a, b):
+        if a is None:
+            raise Exception("Starting position is none")
+        
+        if b is None:
+            raise Exception("Ending position is none")
+        
         return abs(a.x - b.x) + abs(a.y - b.y)
 
     @staticmethod
