@@ -57,7 +57,7 @@ class CustomUniversalAgent(CaptureAgent):
             game_state,
             self.get_food(game_state).as_list(),
             game_state.get_agent_position(self.index),
-            game_state.get_agent_state(self.index).is_pacman,
+            game_state.get_agent_state(self.index),
             [
                 {
                     "pos": s.get_position(),
@@ -81,12 +81,13 @@ class CustomUniversalAgent(CaptureAgent):
 
 class GameData:
 
-    def __init__(self, is_red, legal_moves, game_state, food_positions, current_position, is_pacman, enemies, capsules, walls):
+    def __init__(self, is_red, legal_moves, game_state, food_positions, current_position, agent_state, enemies, capsules, walls):
         self.legal_moves = legal_moves
         self.game_state = game_state
         self.food_positions = food_positions
         self.current_position = Position.from_tuple(current_position)
-        self.is_pacman = is_pacman
+        self.is_pacman = agent_state.is_pacman
+        self.is_scared = agent_state.scared_timer > 0
         self.enemies = enemies
         self.walls = walls
 
@@ -618,20 +619,15 @@ class DefendingGoal(AgentGoal):
 
         nearby_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
         if nearby_enemy is not None and (self.parent.position_path is None or not self.parent.position_path.is_completed()):
-            print("Nearby enemy: ", nearby_enemy)
-            
-            if not nearby_enemy["isPacman"]:
+            if not self.parent.game_data.is_scared:
                 self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(nearby_enemy["pos"])), "Chasing enemy in home territory")
                 return "Chasing enemy in home territory"
-
-            else:
-                print("nearby enemy is a pacman")
     
-                restricted = [Position.from_tuple(nearby_enemy["pos"])]
-                closest_safe = self.parent.get_closest_safe_position(current_position, restricted)
-                
-                self.parent.set_position_path(closest_safe, "Fleeing from enemy")
-                return "Fleeing from the enemy in home territory"
+            restricted = [Position.from_tuple(nearby_enemy["pos"])]
+            closest_safe = self.parent.get_closest_safe_position(current_position, restricted)
+            
+            self.parent.set_position_path(closest_safe, "Fleeing from enemy")
+            return "Fleeing from the enemy in home territory"
 
         # Actively pursue enemy in home territory
         if self.parent.position_path is None or (self.parent.position_path is not None and not self.parent.position_path.is_completed()):
@@ -639,7 +635,6 @@ class DefendingGoal(AgentGoal):
 
             if updated_valid_enemy is not None and not updated_valid_enemy["isPacman"]:
                 self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(updated_valid_enemy["pos"])), "Updating chase position in home territory")
-                print("Chasing in home")
                 return "Updating chase position"
 
         if self.parent.position_path is not None and not self.parent.position_path.is_completed():
