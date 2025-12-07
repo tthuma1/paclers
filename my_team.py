@@ -1,183 +1,939 @@
-# my_team.py
-# ---------------
-# Licensing Information: Please do not distribute or publish solutions to this
-# project. You are free to use and extend these projects for educational
-# purposes. The Pacman AI projects were developed at UC Berkeley, primarily by
-# John DeNero (denero@cs.berkeley.edu) and Dan Klein (klein@cs.berkeley.edu).
-# For more info, see http://inst.eecs.berkeley.edu/~cs188/sp09/pacman.html
-
+import heapq
 import random
-import contest.util as util
+from collections import defaultdict
+from enum import Enum, auto
+from typing import override
 
 from contest.capture_agents import CaptureAgent
-from contest.game import Directions
-from contest.util import nearest_point
+from contest.graphics_utils import circle, format_color
 
 
-#################
-# Team creation #
-#################
+def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent', num_training=1):
+    print("Agent 1: ", first_index, " Type: ", first)
+    print("Agent 2: ", second_index, " Type: ", second)
 
-def create_team(first_index, second_index, is_red,
-                first='OffensiveReflexAgent', second='DefensiveReflexAgent', num_training=0):
-    """
-    This function should return a list of two agents that will form the
-    team, initialized using firstIndex and secondIndex as their agent
-    index numbers.  isRed is True if the red team is being created, and
-    will be False if the blue team is being created.
-
-    As a potentially helpful development aid, this function can take
-    additional string-valued keyword arguments ("first" and "second" are
-    such arguments in the case of this function), which will come from
-    the --red_opts and --blue_opts command-line arguments to capture.py.
-    For the nightly contest, however, your team will be created without
-    any extra arguments, so you should make sure that the default
-    behavior is what you want for the nightly contest.
-    """
-    return [eval(first)(first_index), eval(second)(second_index)]
+    return [eval(first)(first_index, 0, is_red), eval(second)(second_index, 1, is_red)]
 
 
-##########
-# Agents #
-##########
+class DummyAgent(CaptureAgent):
 
-class ReflexCaptureAgent(CaptureAgent):
-    """
-    A base class for reflex agents that choose score-maximizing actions
-    """
-
-    def __init__(self, index, time_for_computing=.1):
+    def __init__(self, index, agent_index, is_red, time_for_computing=1):
         super().__init__(index, time_for_computing)
         self.start = None
+        self.agent_index = agent_index
+        self.is_red = is_red
+
+    def choose_action(self, game_state):
+        return "Stop"
+
+
+class CustomUniversalAgent(CaptureAgent):
+    mapped_moves = defaultdict(list)
+    mapped_decisions = defaultdict(list)
+
+    def __init__(self, index, agent_index, is_red, time_for_computing=.1):
+        super().__init__(index, time_for_computing)
+        self.agent_index = agent_index
+        self.is_red = is_red
+        self.start = None
+        self.move_count = 0
+        self.interpreter = GameInterpreter(agent_index, self)
+
+    def final(self, game_state):
+        print("Agent ", self.agent_index, " made ", self.move_count, " moves")
+        # print("Mapped Moves:", CustomUniversalAgent.mapped_moves[self.agent_index])
+        # print("Mapped Decisions", CustomUniversalAgent.mapped_decisions[self.agent_index])
 
     def register_initial_state(self, game_state):
         self.start = game_state.get_agent_position(self.index)
         CaptureAgent.register_initial_state(self, game_state)
 
     def choose_action(self, game_state):
-        """
-        Picks among the actions with the highest Q(s,a).
-        """
         actions = game_state.get_legal_actions(self.index)
 
-        # You can profile your evaluation time by uncommenting these lines
-        # start = time.time()
-        values = [self.evaluate(game_state, a) for a in actions]
-        # print 'eval time for agent %d: %.4f' % (self.index, time.time() - start)
+        next_move = self.interpreter.compute_next_move(GameData(
+            self.is_red,
+            actions,
+            game_state,
+            self.get_food(game_state).as_list(),
+            game_state.get_agent_position(self.index),
+            game_state.get_agent_state(self.index),
+            [
+                {
+                    "pos": s.get_position(),
+                    "isPacman": s.is_pacman,
+                    "scaredTimer": s.scared_timer
+                }
+                for s in [game_state.get_agent_state(i) for i in self.get_opponents(game_state)]
+            ],
+            game_state.get_capsules(),
+            game_state.get_walls().as_list()
+        ))
 
-        max_value = max(values)
-        best_actions = [a for a, v in zip(actions, values) if v == max_value]
-
-        food_left = len(self.get_food(game_state).as_list())
-
-        if food_left <= 2:
-            best_dist = 9999
-            best_action = None
-            for action in actions:
-                successor = self.get_successor(game_state, action)
-                pos2 = successor.get_agent_position(self.index)
-                dist = self.get_maze_distance(self.start, pos2)
-                if dist < best_dist:
-                    best_action = action
-                    best_dist = dist
-            return best_action
-
-        return random.choice(best_actions)
-
-    def get_successor(self, game_state, action):
-        """
-        Finds the next successor which is a grid position (location tuple).
-        """
-        successor = game_state.generate_successor(self.index, action)
-        pos = successor.get_agent_state(self.index).get_position()
-        if pos != nearest_point(pos):
-            # Only half a grid position was covered
-            return successor.generate_successor(self.index, action)
+        if next_move is None:
+            actual_move = random.choice(actions)
         else:
-            return successor
+            actual_move = next_move.__str__().strip()
 
-    def evaluate(self, game_state, action):
-        """
-        Computes a linear combination of features and feature weights
-        """
-        features = self.get_features(game_state, action)
-        weights = self.get_weights(game_state, action)
-        return features * weights
+        self.move_count += 1
+        CustomUniversalAgent.mapped_moves[self.index].append(actual_move)
+        return actual_move
 
-    def get_features(self, game_state, action):
-        """
-        Returns a counter of features for the state
-        """
-        features = util.Counter()
-        successor = self.get_successor(game_state, action)
-        features['successor_score'] = self.get_score(successor)
-        return features
+class GameData:
 
-    def get_weights(self, game_state, action):
-        """
-        Normally, weights do not depend on the game state.  They can be either
-        a counter or a dictionary.
-        """
-        return {'successor_score': 1.0}
+    def __init__(self, is_red, legal_moves, game_state, food_positions, current_position, agent_state, enemies, capsules, walls):
+        self.legal_moves = legal_moves
+        self.game_state = game_state
+        self.food_positions = food_positions
+        self.current_position = Position.from_tuple(current_position)
+        self.is_pacman = agent_state.is_pacman
+        self.is_scared = agent_state.scared_timer > 0
+        self.enemies = enemies
+        self.walls = walls
+
+        if is_red:
+            self.agent_color = RedAgentColor("red")
+        else:
+            self.agent_color = BlueAgentColor("blue")
+
+        self.capsule = Capsule(self.agent_color, capsules)
+
+class Capsule:
+
+    def __init__(self, color, capsules):
+        self.consumed = False
+        self.position = None
+        self.capsule_active_time = 40
+        self.capsule_expended = False
+
+        for capsule in capsules:
+            capsule_position = Position.from_tuple(capsule)
+
+            if color.is_position_on_safe_side(capsule_position):
+                continue
+
+            self.position = capsule_position
+            break
+
+    def eat_capsule(self, interpreter):
+        self.consumed = True
+        interpreter.set_game_state(GameState.ATTACKING)
+
+    def decrease_time(self, interpreter):
+        if self.capsule_expended:
+            return
+        
+        self.capsule_active_time -= 1
+
+        if self.capsule_active_time <= 0:
+            self.capsule_expended = True
+            interpreter.set_game_state(interpreter.previous_game_state)
+
+class AgentColor:
+
+    def __init__(self, color):
+        self.color = color
+
+    def is_position_on_safe_side(self, position):
+        return False
+
+    def get_defensive_treshold(self):
+        return None
+
+    def get_reposition_treshold(self):
+        return None
+
+    def get_spawn_treshold(self):
+        return None
 
 
-class OffensiveReflexAgent(ReflexCaptureAgent):
-    """
-  A reflex agent that seeks food. This is an agent
-  we give you to get an idea of what an offensive agent might look like,
-  but it is by no means the best or only way to build an offensive agent.
-  """
+class RedAgentColor(AgentColor):
 
-    def get_features(self, game_state, action):
-        features = util.Counter()
-        successor = self.get_successor(game_state, action)
-        food_list = self.get_food(successor).as_list()
-        features['successor_score'] = -len(food_list)  # self.getScore(successor)
+    @override
+    def is_position_on_safe_side(self, position):
+        return position.x <= 15
 
-        # Compute distance to the nearest food
+    @override
+    def get_defensive_treshold(self):
+        return 11, 14
 
-        if len(food_list) > 0:  # This should always be True,  but better safe than sorry
-            my_pos = successor.get_agent_state(self.index).get_position()
-            min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
-            features['distance_to_food'] = min_distance
-        return features
+    @override
+    def get_reposition_treshold(self):
+        return 13, 14
 
-    def get_weights(self, game_state, action):
-        return {'successor_score': 100, 'distance_to_food': -1}
+    @override
+    def get_spawn_treshold(self):
+        return 0, 4
 
 
-class DefensiveReflexAgent(ReflexCaptureAgent):
-    """
-    A reflex agent that keeps its side Pacman-free. Again,
-    this is to give you an idea of what a defensive agent
-    could be like.  It is not the best or only way to make
-    such an agent.
-    """
+class BlueAgentColor(AgentColor):
 
-    def get_features(self, game_state, action):
-        features = util.Counter()
-        successor = self.get_successor(game_state, action)
+    @override
+    def is_position_on_safe_side(self, position):
+        return position.x >= 16
 
-        my_state = successor.get_agent_state(self.index)
-        my_pos = my_state.get_position()
+    @override
+    def get_defensive_treshold(self):
+        return 17, 21
 
-        # Computes whether we're on defense (1) or offense (0)
-        features['on_defense'] = 1
-        if my_state.is_pacman: features['on_defense'] = 0
+    @override
+    def get_reposition_treshold(self):
+        return 17, 18
 
-        # Computes distance to invaders we can see
-        enemies = [successor.get_agent_state(i) for i in self.get_opponents(successor)]
-        invaders = [a for a in enemies if a.is_pacman and a.get_position() is not None]
-        features['num_invaders'] = len(invaders)
-        if len(invaders) > 0:
-            dists = [self.get_maze_distance(my_pos, a.get_position()) for a in invaders]
-            features['invader_distance'] = min(dists)
+    @override
+    def get_spawn_treshold(self):
+        return 27, 31
 
-        if action == Directions.STOP: features['stop'] = 1
-        rev = Directions.REVERSE[game_state.get_agent_state(self.index).configuration.direction]
-        if action == rev: features['reverse'] = 1
+class GameInterpreter:
 
-        return features
+    def __init__(self, agent_index, parent):
+        self.agent_index = agent_index
+        self.parent = parent
+        self.game_data = None
+        self.previous_game_state = None
+        self.previous_game_data = None
+        self.position_path = None
+        self.last_safe_position = None
+        self.starting_position = None
+        self.previous_position = None
+        self.collected_food = 0
+        self.encounter_counter = 0
+        self.capsule = None
 
-    def get_weights(self, game_state, action):
-        return {'num_invaders': -1000, 'on_defense': 100, 'invader_distance': -10, 'stop': -100, 'reverse': -2}
+        if self.agent_index == 0:
+            self.path_color = format_color(0, 0.4, 0.4)
+            initial_state = GameState.FINDING_FOOD
+            allowed_goals = [
+                CapsuleFindGoal(self),
+                FindingFoodGoal(self),
+                DepositingFoodGoal(self),
+                AttackingGoal(self),
+                OffensiveFleeingGoal(self)
+            ]
+        else:
+            self.path_color = format_color(0.4, 0.4, 0)
+            initial_state = GameState.DEFENDING
+            allowed_goals = [
+                DefendingGoal(self),
+                DefensiveFleeingGoal(self)
+            ]
+
+        self.game_state = initial_state
+        self.allowed_goals = allowed_goals
+        
+        # TODO: Remove me, this is temp for debug
+        self.displayed_previous_path = False
+
+    def set_game_state(self, new_state):
+        self.previous_game_state = self.game_state
+        self.game_state = new_state
+
+        print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
+
+    def set_position_path(self, path, reason, show=False):
+        if path is not None:
+            print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
+        else:
+            print("[", self.agent_index, "] Set new position with reason ", reason)
+    
+        if self.position_path is not None and self.displayed_previous_path:
+            self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
+            self.displayed_previous_path = False
+    
+        if path is not None and show:
+            self.display_path(path.positions, self.path_color)
+            self.displayed_previous_path = True
+        
+        self.position_path = path
+        
+    def display_path(self, positions, color):
+        for position in positions:
+            point = Position.to_tuple(position)
+            circle(self.parent.display.to_screen(point=point), 3,  outline_color=color, fill_color=format_color(0, 0, 0), width=1)
+
+    def is_position_safe(self, position):
+        if position is None:
+            return False
+
+        return self.game_data.agent_color.is_position_on_safe_side(position)
+
+    @staticmethod
+    def is_position_valid(game_state, position):
+        if position.x >= 32 or position.y >= 32 or position.x < 0 or position.y < 0:
+            return False
+
+        return position not in game_state.get_walls().as_list()
+
+    def handle_death(self):
+        if self.previous_position is None:
+            return
+
+        if self.game_data.current_position.distance(self.previous_position) <= 1:
+            return
+
+        self.game_state = GameState.FINDING_FOOD
+        self.set_position_path(None, "Agent died, clearing")
+        self.last_safe_position = None
+        self.previous_position = None
+        self.previous_game_data = None
+        self.collected_food = 0
+        
+    def handle_capsule_state(self):
+        if self.capsule is None:
+            self.capsule = self.game_data.capsule
+
+        if self.game_data.capsule.position is not None:
+            return
+
+        if self.get_distance(self.capsule.position, self.game_data.current_position) > 2:
+            return
+
+        if self.capsule.capsule_active_time <= 0:
+            return
+
+        if not self.capsule.consumed:
+            self.capsule.eat_capsule(self)
+            return
+
+        self.capsule.decrease_time(self)
+
+
+    def get_distance(self, from_position, to_position):
+        if from_position.x > 32 and to_position.x > 32 and from_position.y < 0 and to_position.y < 0:
+            return 1_000  # Out of bounds distance
+
+        try:
+            return self.parent.get_maze_distance(from_position.to_tuple(), to_position.to_tuple())
+        except Exception:
+            return 1_000
+
+    def get_empty_spaces(self, min_x=0, max_x=32, min_y=0, max_y=32):
+        empty_spaces = []
+        for x in range(32):
+            for y in range(32):
+                position = Position(x, y)
+                if not self.is_position_valid(self.game_data.game_state, position):
+                    continue
+
+                if position.x < min_x or position.x > max_x:
+                    continue
+
+                if position.y < min_y or position.y > max_y:
+                    continue
+
+                empty_spaces.append(position)
+
+        return empty_spaces
+
+    def get_closest_food(self, current_position, remaining_food):
+        mapped_positions = {
+            pos: self.get_distance(current_position, Position.from_tuple(pos))
+            for pos in remaining_food
+        }
+
+        if not mapped_positions:
+            return None
+
+        closest_position, closest_distance = min(
+            mapped_positions.items(),
+            key=lambda item: item[1]
+        )
+
+        return closest_position, closest_distance
+
+    def get_closest_safe_position(self, current_position, restricted=set()):
+        if self.last_safe_position is None:
+            return None
+
+        closest = None
+        for y in range(32):
+            position = self.last_safe_position.__set_y__(y)
+
+            if not self.is_position_safe(position) or not self.is_position_valid(self.game_data.game_state, position):
+                continue
+
+            position_path = PositionPath(self.game_data, current_position, position, restricted)
+
+            if position_path.is_empty():
+                continue
+
+            if closest is None:
+                closest = position_path
+                continue
+
+            if closest.needed_steps > position_path.needed_steps:
+                closest = position_path
+
+        return closest
+
+    # Returns an enemy in attacker territory (other)
+    def get_valid_defensive_enemy(self, game_data, distance_threshold):
+        current_position = game_data.current_position
+        enemies = game_data.enemies
+
+        valid_enemies = list()
+        for enemy in enemies:
+            enemy_position = enemy["pos"]
+            if enemy_position is None or self.is_position_safe(Position.from_tuple(enemy_position)):
+                continue
+
+            distance = self.get_distance(current_position, Position.from_tuple(enemy_position))
+            if distance > distance_threshold:
+                continue
+
+            valid_enemies.append(enemy)
+
+        if len(valid_enemies) <= 0:
+            return None
+
+        current_position = game_data.current_position
+        return min(
+            valid_enemies,
+            key=lambda item: self.get_distance(current_position, item["pos"])
+        )
+
+    # Returns an enemy in home territory (self)
+    def get_valid_offensive_enemy(self, game_data):
+        enemies = game_data.enemies
+
+        valid_enemies = list()
+        for enemy in enemies:
+            enemy_position = enemy["pos"]
+
+            if enemy_position is None or not self.is_position_safe(Position.from_tuple(enemy_position)):
+                continue
+            
+            valid_enemies.append(enemy)
+            
+        if len(valid_enemies) <= 0:
+            return None
+
+        current_position = game_data.current_position
+        return min(
+            valid_enemies,
+            key=lambda item: self.get_distance(current_position, item["pos"])
+        )
+
+    def get_random_reposition_position(self, game_data, origin):
+        return self.get_random_treshold_position(game_data, origin, game_data.agent_color.get_reposition_treshold(), 1_000)
+
+    def get_random_defensive_position(self, game_data, origin, max_distance):
+        return self.get_random_treshold_position(game_data, origin, game_data.agent_color.get_defensive_treshold(), max_distance)
+    
+    def get_random_treshold_position(self, game_data, origin, treshold, max_distance):
+        empty_spaces = self.get_empty_spaces(min_x=treshold[0], max_x=treshold[1])
+    
+        for _ in range(50):
+            candidate = random.choice(empty_spaces)
+    
+            if candidate == origin:
+                continue
+    
+            if not self.is_position_valid(game_data.game_state, candidate) or not self.is_position_safe(candidate):
+                continue
+    
+            distance = self.get_distance(origin, candidate)
+            if distance >= 1_000 or distance > max_distance:
+                continue
+    
+            return candidate
+    
+        return None
+
+    def compute_next_move(self, game_data):
+        self.game_data = game_data
+
+        legal_directions = game_data.legal_moves
+        current_position = game_data.current_position
+
+        if self.starting_position is None:
+            self.starting_position = current_position
+
+        if self.is_position_safe(current_position) and current_position is not self.last_safe_position:
+            self.last_safe_position = current_position
+
+        self.handle_death()
+        self.handle_capsule_state()
+
+        detailed_move = defaultdict()
+        for goal in self.allowed_goals:
+            compute_result = goal.compute()
+            detailed_move[goal.__class__] = compute_result
+
+        #print(self.agent_index, " ", detailed_move)
+        CustomUniversalAgent.mapped_decisions[self.agent_index].append(detailed_move)
+
+        if self.position_path is not None:
+            next_step = self.position_path.step()
+
+            if next_step is not None:
+                move = Direction.from_position(current_position, next_step)
+
+                if move is not None and move.__str__() in legal_directions:
+                    self.previous_position = current_position
+                    self.previous_game_data = game_data
+                    return move
+
+            self.set_position_path(None, "Current finished, clearing")
+
+        self.previous_position = current_position
+        self.previous_game_data = game_data
+
+        return Direction.STOP
+
+
+class AgentGoal:
+
+    def __init__(self, parent):
+        self.parent = parent
+
+    def compute(self) -> str:
+        return "None"
+
+
+class FindingFoodGoal(AgentGoal):
+
+    @override
+    def compute(self):
+        remaining_food = self.parent.game_data.food_positions
+        current_position = self.parent.game_data.current_position
+        closest_food_entry = self.parent.get_closest_food(current_position, self.parent.game_data.food_positions)
+
+        if self.parent.game_state is not GameState.FINDING_FOOD and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING:
+            return "Different goal active"
+
+        if self.parent.game_state is GameState.ATTACKING and self.parent.position_path is not None:
+            return "Attacking an enemy already"
+
+        if len(remaining_food) == 0 and (self.parent.position_path is None or self.parent.position_path.is_completed()):
+            closest_safe = self.parent.get_closest_safe_position(current_position)
+
+            if closest_safe is not None:
+                self.parent.set_position_path(closest_safe, "All food has been consumed, returning home")
+
+            return "All food has been collected, returning home"
+
+        is_food_square = self.parent.previous_game_data is not None and Position.to_tuple(current_position) in self.parent.previous_game_data.food_positions
+        if is_food_square:
+            self.parent.collected_food += 1
+
+        if self.parent.collected_food >= 5 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (closest_food_entry is not None and closest_food_entry[1] >= 2):
+            print("Depositing food")
+            self.parent.set_game_state(GameState.DEPOSITING_FOOD)
+            return "Collected at least 5 food, returning home to deposit"
+
+        if self.parent.position_path is not None and not self.parent.position_path.is_completed() or closest_food_entry is None:
+            return "Already executing food collection"
+
+        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(closest_food_entry[0])), "New food found")
+        return "Executing new food collection"
+
+
+class DepositingFoodGoal(AgentGoal):
+
+    @override
+    def compute(self):
+        current_position = self.parent.game_data.current_position
+
+        if self.parent.collected_food > 0 and self.parent.is_position_safe(current_position):
+            self.parent.collected_food = 0
+
+        if self.parent.game_state is not GameState.DEPOSITING_FOOD:
+            return "Different goal active"
+
+        if self.parent.position_path is None:
+            closest_safe = self.parent.get_closest_safe_position(current_position)
+
+            if closest_safe is not None:
+                self.parent.set_position_path(closest_safe, "Depositing food")
+
+            return "Returning home to deposit food"
+
+        if not self.parent.position_path.is_completed():
+            return "Already executing food deposit"
+
+        self.parent.set_position_path(None, "Clearing position path, deposited food")
+        self.parent.set_game_state(GameState.FINDING_FOOD)
+        return "Deposited food, switching back to finding food"
+
+
+class OffensiveFleeingGoal(AgentGoal):
+
+    @override
+    def compute(self):
+        if self.parent.game_state is GameState.ATTACKING:
+            print("Attacking")
+            return "Attacking, no need to flee"
+
+        current_position = self.parent.game_data.current_position
+        valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 3)
+        if self.parent.game_state is GameState.OFFENSIVE_FLEEING:
+            if valid_enemy is None or self.parent.is_position_safe(current_position):
+                self.parent.set_game_state(self.parent.previous_game_state)
+                print("Resetting state")
+                return "Resetting state as we're no longer in danger"
+
+        if valid_enemy is None:
+            # print("No enemy")
+            return "No enemy found, no need to flee"
+
+        if self.parent.encounter_counter >= 1 and (self.parent.position_path is None or self.parent.position_path is not None and self.parent.position_path.is_completed()):
+            restricted = [self.parent.previous_position]
+            random_position = self.parent.get_random_reposition_position(self.parent.game_data, current_position)
+
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position, restricted), "Being sm0rt and not falling for the good old switcheroo", show=True)
+            print("Switcheroo ", random_position)
+            return "Being sm0rt and not falling for the good old switcheroo"
+        
+        if self.parent.is_position_safe(current_position):
+            return "We're still in safe territory, don't flee"
+        
+        if self.parent.game_state is GameState.OFFENSIVE_FLEEING:
+            return "Ignored already set state"
+
+        restricted = [Position.from_tuple(valid_enemy["pos"])]
+        closest_safe = self.parent.get_closest_safe_position(current_position, restricted)
+        
+        self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Offensive)", show=True)
+        self.parent.set_game_state(GameState.OFFENSIVE_FLEEING)
+        self.parent.encounter_counter += 1
+        print("Fleeing")
+        return "Found a valid enemy, fleeing"
+
+
+class DefensiveFleeingGoal(AgentGoal):
+
+    @override
+    def compute(self):
+        current_position = self.parent.game_data.current_position
+        if self.parent.game_state is GameState.DEFENSIVE_FLEEING and self.parent.position_path is None:
+            self.parent.set_game_state(self.parent.previous_game_state)
+            return "Already fleeing or resetting to previous state due to completed goal"
+
+        valid_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
+        if valid_enemy is None or valid_enemy["isPacman"]:
+            return "No valid enemy or pacman"
+
+        closest_safe = self.parent.get_closest_safe_position(current_position)
+        if closest_safe is not None:
+            self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Defensive)")
+
+        self.parent.set_game_state(GameState.DEFENSIVE_FLEEING)
+        return "Found a valid enemy, fleeing"
+
+
+class DefendingGoal(AgentGoal):
+
+    @override
+    def compute(self):
+        if self.parent.game_state is not GameState.DEFENDING:
+            return "Different goal active"
+    
+        current_position = self.parent.game_data.current_position
+        # Initial movement to starting defense position
+        if current_position.is_x_between(self.parent.game_data.agent_color.get_spawn_treshold()) and self.parent.position_path is None:
+            random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
+            
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Initial defending position")
+            return "Moving to initial defending position"
+    
+        # If we're in enemy territory, move to our side
+        if not self.parent.is_position_safe(current_position):
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, self.parent.last_safe_position), "Moving to defense")
+
+        nearby_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
+        if nearby_enemy is not None and (self.parent.position_path is None or not self.parent.position_path.is_completed()):
+            if not self.parent.game_data.is_scared:
+                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(nearby_enemy["pos"])), "Chasing enemy in home territory")
+                return "Chasing enemy in home territory"
+    
+            restricted = [Position.from_tuple(nearby_enemy["pos"])]
+            closest_safe = self.parent.get_closest_safe_position(current_position, restricted)
+            
+            self.parent.set_position_path(closest_safe, "Fleeing from enemy")
+            return "Fleeing from the enemy in home territory"
+
+        # Actively pursue enemy in home territory
+        if self.parent.position_path is None or (self.parent.position_path is not None and not self.parent.position_path.is_completed()):
+            updated_valid_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
+
+            if updated_valid_enemy is not None and not self.parent.game_data.is_scared:
+                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(updated_valid_enemy["pos"])), "Updating chase position in home territory")
+                return "Updating chase position"
+
+        if self.parent.position_path is not None and not self.parent.position_path.is_completed():
+            return "Already pursuing an active goal"
+
+        # Find a random defending position (reposition)
+        random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 6)
+        if random_defending_position is None:
+            return "Invalid random defending position"
+        
+        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Moving to a new defensive position")
+        return "Moving to a new defensive position"
+
+
+class AttackingGoal(AgentGoal):
+
+    @override
+    def compute(self):
+        current_position = self.parent.game_data.current_position
+        valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 4)
+
+        # print("[", self.parent.agent_index, "]", valid_enemy)
+
+        if self.parent.game_state is not GameState.ATTACKING:
+            return "Not attacking"
+
+        if valid_enemy is None:
+            return "No valid enemy found"
+
+        if valid_enemy["scaredTimer"] <= 0:
+            self.parent.set_game_state(GameState.OFFENSIVE_FLEEING)
+            return "Found enemy that was already eaten, run"
+        
+        target_pos = Position.from_tuple(valid_enemy["pos"])
+        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, target_pos),"Attacking visible enemy")
+
+        # print("Attacking visible enemy")
+        return "Attacking visible enemy"
+
+
+class CapsuleFindGoal(AgentGoal):
+    
+    @override
+    def compute(self):
+        if self.parent.capsule.capsule_expended and self.parent.game_state is GameState.ATTACKING:
+            self.parent.set_game_state(self.parent.previous_game_state)
+            return "Resetting state as we've expended the capsule"
+        
+        if self.parent.game_state is GameState.FINDING_CAPSULE or self.parent.capsule.consumed:
+            return "Already finding capsule or eaten"
+
+        capsule_position = self.parent.capsule.position
+        current_position = self.parent.game_data.current_position
+        distance = self.parent.get_distance(capsule_position, current_position)
+
+        if distance <= 3:
+            self.parent.set_game_state(GameState.FINDING_CAPSULE)
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, capsule_position), "Moving to the capsule position")
+            return "Finding Capsule"
+
+        return "Capsule is not close enough, ignoring"
+
+class Position:
+
+    @staticmethod
+    def from_tuple(origin):
+        return Position(origin[0], origin[1])
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def clone(self):
+        return Position(self.x, self.y)
+
+    def distance(self, other):
+        return abs(self.x - other.x) + abs(self.y - other.y)
+
+    def to_tuple(self):
+        return self.x, self.y
+
+    def is_x_between(self, treshold):
+        return treshold[0] <= self.x <= treshold[1]
+
+    def __set_x__(self, x):
+        return Position(self.x + x, self.y)
+
+    def __set_y__(self, y):
+        return Position(self.x, self.y + y)
+
+    def __add__(self, x, y):
+        return Position(self.x + x, self.y + y)
+
+    def __eq__(self, other):
+        return isinstance(other, Position) and self.x == other.x and self.y == other.y
+
+    def __repr__(self):
+        return f"Position(x={self.x}, y={self.y})"
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
+
+class PositionPath:
+    def __init__(self, game_data, starting, ending, restricted=list()):
+        self.origin = starting
+        self.destination = ending
+        self.positions = self._generate_positions(game_data, starting, ending, restricted)
+
+        if self.positions and self.positions[0] == starting:
+            self.positions.pop(0)
+
+        self.current_step = 0
+
+    def is_empty(self):
+        return len(self.positions) == 0
+
+    @property
+    def needed_steps(self):
+        return len(self.positions)
+
+    @property
+    def goal(self):
+        return self.positions[-1] if self.positions else None
+
+    @property
+    def current_step_index(self):
+        return self.current_step
+
+    def is_completed(self):
+        return self.current_step == len(self.positions)
+
+    def step(self):
+        if self.current_step > len(self.positions) - 1:
+            return None  # already completed
+
+        pos = self.positions[self.current_step]
+        self.current_step += 1
+        return pos
+
+    def _generate_positions(self, game_data, start, end, restricted):
+        walls = set(game_data.walls)
+        result = []
+
+        open_heap = []
+        all_nodes = {}
+        closed = set()
+
+        start_node = self.Node(start, None, 0, self._manhattan(start, end))
+        heapq.heappush(open_heap, start_node)
+        all_nodes[start] = start_node
+
+        while open_heap:
+            current = heapq.heappop(open_heap)
+            closed.add(current.position)
+
+            if current.position == end:
+                node = current
+                while node:
+                    result.insert(0, node.position)
+                    node = node.parent
+                return result
+
+            for neighbor_pos in self._get_neighbors(current.position):
+                if Position.to_tuple(neighbor_pos) in walls or neighbor_pos in closed:
+                    continue
+
+                if neighbor_pos in restricted:
+                    continue
+
+                g = current.g_cost + 1
+                neighbor_node = all_nodes.get(neighbor_pos)
+
+                if neighbor_node is None:
+                    neighbor_node = self.Node(
+                        neighbor_pos,
+                        current,
+                        g,
+                        self._manhattan(neighbor_pos, end)
+                    )
+                    all_nodes[neighbor_pos] = neighbor_node
+                    heapq.heappush(open_heap, neighbor_node)
+
+                elif g < neighbor_node.g_cost:
+                    neighbor_node.parent = current
+                    neighbor_node.g_cost = g
+                    neighbor_node.f_cost = g + neighbor_node.h_cost
+
+                    open_heap.remove(neighbor_node)
+                    heapq.heapify(open_heap)
+                    heapq.heappush(open_heap, neighbor_node)
+
+        return result
+
+    @staticmethod
+    def _manhattan(a, b):
+        if a is None:
+            raise Exception("Starting position is none")
+        
+        if b is None:
+            raise Exception("Ending position is none")
+        
+        return abs(a.x - b.x) + abs(a.y - b.y)
+
+    @staticmethod
+    def _get_neighbors(pos):
+        return [
+            Position(pos.x + 1, pos.y),
+            Position(pos.x - 1, pos.y),
+            Position(pos.x, pos.y + 1),
+            Position(pos.x, pos.y - 1)
+        ]
+
+    def __str__(self):
+        if not self.positions:
+            return "Path[empty]"
+
+        return f"Path[start={self.positions[0]}, end={self.positions[-1]}, steps={len(self.positions)}]"
+
+    class Node:
+        def __init__(self, position, parent, g_cost, h_cost):
+            self.position = position
+            self.parent = parent
+            self.g_cost = g_cost
+            self.h_cost = h_cost
+            self.f_cost = g_cost + h_cost
+
+        def __lt__(self, other):
+            return self.f_cost < other.f_cost
+
+
+class Direction(Enum):
+    NORTH = auto()
+    SOUTH = auto()
+    EAST = auto()
+    WEST = auto()
+    STOP = auto()
+
+    def apply_modifier(self, position) -> Position:
+        if self is Direction.NORTH:
+            return position.__add__(0, 1)
+        if self is Direction.SOUTH:
+            return position.__add__(0, -1)
+        if self is Direction.EAST:
+            return position.__add__(1, 0)
+        if self is Direction.WEST:
+            return position.__add__(-1, 0)
+        else:
+            return position
+
+    @staticmethod
+    def valid_directions():
+        return [d for d in Direction if d is not Direction.STOP]
+
+    @staticmethod
+    def from_position(current_position, next_step):
+        for direction in Direction.valid_directions():
+            directional = direction.apply_modifier(current_position)
+
+            if directional.__eq__(next_step):
+                return direction
+
+        return None
+
+    def __str__(self):
+        name = self.name.lower()
+        return name[0].upper() + name[1:]
+
+
+class GameState(Enum):
+    FINDING_FOOD = auto()
+    FINDING_CAPSULE = auto()
+    DEPOSITING_FOOD = auto()
+    OFFENSIVE_FLEEING = auto()  # When we're on the opponents side
+    DEFENSIVE_FLEEING = auto()  # When we're on home territory
+    DEFENDING = auto()
+    ATTACKING = auto()
+    WANDER = auto()
