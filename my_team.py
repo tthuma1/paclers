@@ -8,7 +8,7 @@ from contest.capture_agents import CaptureAgent
 from contest.graphics_utils import circle, format_color
 
 
-def create_team(first_index, second_index, is_red, first='DummyAgent', second='CustomUniversalAgent', num_training=1):
+def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent', num_training=1):
     print("Agent 1: ", first_index, " Type: ", first)
     print("Agent 2: ", second_index, " Type: ", second)
 
@@ -135,6 +135,9 @@ class AgentColor:
     def get_defensive_treshold(self):
         return None
 
+    def get_reposition_treshold(self):
+        return None
+
     def get_spawn_treshold(self):
         return None
 
@@ -150,6 +153,10 @@ class RedAgentColor(AgentColor):
         return 11, 14
 
     @override
+    def get_reposition_treshold(self):
+        return 13, 14
+
+    @override
     def get_spawn_treshold(self):
         return 0, 4
 
@@ -163,6 +170,10 @@ class BlueAgentColor(AgentColor):
     @override
     def get_defensive_treshold(self):
         return 17, 21
+
+    @override
+    def get_reposition_treshold(self):
+        return 20, 21
 
     @override
     def get_spawn_treshold(self):
@@ -209,7 +220,7 @@ class GameInterpreter:
         self.previous_game_state = self.game_state
         self.game_state = new_state
 
-        #print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
+        print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
 
     def set_position_path(self, path, reason):
         if path is not None:
@@ -398,25 +409,30 @@ class GameInterpreter:
             key=lambda item: self.get_distance(current_position, item["pos"])
         )
 
-    def get_random_defensive_position(self, game_data, origin, max_distance):
-        defensive_treshold = self.game_data.agent_color.get_defensive_treshold()
-        empty_spaces = self.get_empty_spaces(min_x=defensive_treshold[0], max_x=defensive_treshold[1])
+    def get_random_reposition_position(self, game_data, origin):
+        return self.get_random_treshold_position(game_data, origin, game_data.agent_color.get_reposition_treshold(), 1_000)
 
+    def get_random_defensive_position(self, game_data, origin, max_distance):
+        return self.get_random_treshold_position(game_data, origin, game_data.agent_color.get_defensive_treshold(), max_distance)
+    
+    def get_random_treshold_position(self, game_data, origin, treshold, max_distance):
+        empty_spaces = self.get_empty_spaces(min_x=treshold[0], max_x=treshold[1])
+    
         for _ in range(50):
             candidate = random.choice(empty_spaces)
-
+    
             if candidate == origin:
                 continue
-
+    
             if not self.is_position_valid(game_data.game_state, candidate) or not self.is_position_safe(candidate):
                 continue
-
+    
             distance = self.get_distance(origin, candidate)
             if distance >= 1_000 or distance > max_distance:
                 continue
-                
+    
             return candidate
-
+    
         return None
 
     def compute_next_move(self, game_data):
@@ -439,6 +455,7 @@ class GameInterpreter:
             compute_result = goal.compute()
             detailed_move[goal.__class__] = compute_result
 
+        #print(self.agent_index, " ", detailed_move)
         CustomUniversalAgent.mapped_decisions[self.agent_index].append(detailed_move)
 
         if self.position_path is not None:
@@ -542,37 +559,36 @@ class OffensiveFleeingGoal(AgentGoal):
             return "Attacking, no need to flee"
 
         current_position = self.parent.game_data.current_position
-
-        if self.parent.game_state is GameState.OFFENSIVE_FLEEING and (self.parent.position_path is None or self.parent.position_path.is_completed()):
-            self.parent.set_game_state(self.parent.previous_game_state)
-            return "Already fleeing or resetting to previous state due to completed goal"
-
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 3)
         if self.parent.is_position_safe(current_position) and (valid_enemy is None or valid_enemy is not None and not valid_enemy["isPacman"]):
             return "No valid enemy found"
 
         # TODO: This is incorrect
-        # if valid_enemy is not None and not valid_enemy["isPacman"] and self.parent.game_data.is_pacman:
-        #     print("Enemy: ", valid_enemy, " Are we a pacman?: ", self.parent.game_data.is_pacman)
-#
-        #     self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(valid_enemy["pos"])), "Pursuing enemy due to becoming a pacman")
-        #     self.parent.set_game_state(GameState.ATTACKING)
-        #     return "Switching to attack enemy as we've become a pacman"
+        #if valid_enemy is not None and not valid_enemy["isPacman"] and self.parent.game_data.is_pacman:
+        #    print("Enemy: ", valid_enemy, " Are we a pacman?: ", self.parent.game_data.is_pacman)
+        #    self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(valid_enemy["pos"])), "Pursuing enemy due to becoming a pacman")
+        #    self.parent.set_game_state(GameState.ATTACKING)
+        #    return "Switching to attack enemy as we've become a pacman"
 
         if valid_enemy is None or self.parent.game_state is GameState.OFFENSIVE_FLEEING or self.parent.game_state is GameState.DEFENDING:
             return "No valid enemy found (second)"
 
-        if self.parent.encounter_counter >= 2:
-            random_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
+        if self.parent.encounter_counter >= 1:
+            restricted = [self.parent.previous_position]
+            random_position = self.parent.get_random_reposition_position(self.parent.game_data, current_position)
 
-            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position), "Executed the same encounter 10 times, moving to a random position")
-            return "Done the same shit 10 times already, do something else"
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position, restricted), "Being sm0rt and not falling for the good old switcheroo")
+            return "Being sm0rt and not falling for the good old switcheroo"
 
-        closest_safe = self.parent.get_closest_safe_position(current_position)
-        if closest_safe is not None:
-            self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Offensive)")
-            self.parent.encounter_counter += 1
+        if self.parent.game_state is GameState.OFFENSIVE_FLEEING and (self.parent.position_path is None or self.parent.position_path.is_completed()):
+            self.parent.set_game_state(self.parent.previous_game_state)
+            return "Already fleeing or resetting to previous state due to completed goal"
 
+        restricted = [Position.from_tuple(valid_enemy["pos"])]
+        closest_safe = self.parent.get_closest_safe_position(current_position, restricted)
+        
+        self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Offensive)")
+        self.parent.encounter_counter += 1
         self.parent.set_game_state(GameState.OFFENSIVE_FLEEING)
         return "Found a valid enemy, fleeing"
 
@@ -656,7 +672,7 @@ class AttackingGoal(AgentGoal):
         current_position = self.parent.game_data.current_position
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 4)
 
-        print("[", self.parent.agent_index, "]", valid_enemy)
+        # print("[", self.parent.agent_index, "]", valid_enemy)
 
         if self.parent.game_state is not GameState.ATTACKING:
             return "Not attacking"
@@ -674,7 +690,7 @@ class AttackingGoal(AgentGoal):
             "Attacking visible enemy"
         )
 
-        print("Attacking visible enemy")
+        # print("Attacking visible enemy")
         return "Attacking visible enemy"
 
 
