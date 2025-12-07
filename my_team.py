@@ -249,7 +249,7 @@ class GameInterpreter:
     def display_path(self, positions, color):
         for position in positions:
             point = Position.to_tuple(position)
-            circle(self.parent.display.to_screen(point=point), 3,  outline_color=color, fill_color=format_color(0, 0, 0), width=1)
+            # circle(self.parent.display.to_screen(point=point), 3,  outline_color=color, fill_color=format_color(0, 0, 0), width=1)
 
     def is_position_safe(self, position):
         if position is None:
