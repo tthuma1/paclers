@@ -163,8 +163,7 @@ class GameInterpreter:
                 FindingFoodGoal(self),
                 DepositingFoodGoal(self),
                 OffensiveFleeingGoal(self),
-                AttackingGoal(self),
-                WanderGoal(self)
+                AttackingGoal(self)
             ]
         else:
             initial_state = GameState.DEFENDING
@@ -182,13 +181,13 @@ class GameInterpreter:
         self.previous_game_state = self.game_state
         self.game_state = new_state
 
-        print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
+        #print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
 
     def set_position_path(self, path, reason):
-        if path is not None:
-            print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
-        else:
-            print("[", self.agent_index, "] Set new position with reason ", reason)
+        #if path is not None:
+            #print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
+        #else:
+            #print("[", self.agent_index, "] Set new position with reason ", reason)
 
         self.position_path = path
 
@@ -231,7 +230,7 @@ class GameInterpreter:
             return
         
         self.game_data.capsule.consumed = True
-        print("Consumed capsule at ", current_position)
+        #print("Consumed capsule at ", current_position)
 
     def get_distance(self, from_position, to_position):
         if from_position.x > 32 and to_position.x > 32 and from_position.y < 0 and to_position.y < 0:
@@ -575,7 +574,7 @@ class AttackingGoal(AgentGoal):
 
         current_position = self.parent.game_data.current_position
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 4)
-        print("[", self.parent.agent_index, "]", valid_enemy)
+        #print("[", self.parent.agent_index, "]", valid_enemy)
         
         if valid_enemy is not None and valid_enemy["isPacman"]:
             self.parent.set_game_state(self.parent.previous_game_state)
@@ -616,7 +615,7 @@ class WanderGoal(AgentGoal):
         if self.parent.position_path is not None and not self.parent.position_path.is_completed():
             return "Already have an active path"
 
-        print("Current: ", self.parent.position_path)
+        #print("Current: ", self.parent.position_path)
 
         random_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
         if random_position is None:
