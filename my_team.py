@@ -5,9 +5,10 @@ from enum import Enum, auto
 from typing import override
 
 from contest.capture_agents import CaptureAgent
+from contest.graphics_utils import circle, format_color
 
 
-def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent', num_training=5):
+def create_team(first_index, second_index, is_red, first='DummyAgent', second='CustomUniversalAgent', num_training=1):
     print("Agent 1: ", first_index, " Type: ", first)
     print("Agent 2: ", second_index, " Type: ", second)
 
@@ -16,9 +17,11 @@ def create_team(first_index, second_index, is_red, first='CustomUniversalAgent',
 
 class DummyAgent(CaptureAgent):
 
-    def __init__(self, index, time_for_computing=1):
+    def __init__(self, index, agent_index, is_red, time_for_computing=1):
         super().__init__(index, time_for_computing)
         self.start = None
+        self.agent_index = agent_index
+        self.is_red = is_red
 
     def choose_action(self, game_state):
         return "Stop"
@@ -38,8 +41,8 @@ class CustomUniversalAgent(CaptureAgent):
 
     def final(self, game_state):
         print("Agent ", self.agent_index, " made ", self.move_count, " moves")
-        #print("Mapped Moves:", CustomUniversalAgent.mapped_moves[self.agent_index])
-        #print("Mapped Decisions", CustomUniversalAgent.mapped_decisions[self.agent_index])
+        # print("Mapped Moves:", CustomUniversalAgent.mapped_moves[self.agent_index])
+        # print("Mapped Decisions", CustomUniversalAgent.mapped_decisions[self.agent_index])
 
     def register_initial_state(self, game_state):
         self.start = game_state.get_agent_position(self.index)
@@ -60,10 +63,7 @@ class CustomUniversalAgent(CaptureAgent):
                     "pos": s.get_position(),
                     "isPacman": s.is_pacman
                 }
-                for s in [
-                game_state.get_agent_state(i)
-                for i in self.get_opponents(game_state)
-            ]
+                for s in [game_state.get_agent_state(i) for i in self.get_opponents(game_state)]
             ],
             game_state.get_capsules(),
             game_state.get_walls().as_list()
@@ -97,17 +97,17 @@ class GameData:
         self.capsule = Capsule(self.agent_color, capsules)
 
 class Capsule:
-    
+
     def __init__(self, color, capsules):
         self.consumed = False
         self.position = None
-        
+
         for capsule in capsules:
             capsule_position = Position.from_tuple(capsule)
-            
+
             if not color.is_position_on_safe_side(capsule_position):
                 continue
-                
+
             self.position = capsule_position
             break
 
@@ -121,6 +121,10 @@ class AgentColor:
 
     def get_defensive_treshold(self):
         return None
+    
+    def get_spawn_treshold(self):
+        return None
+
 
 class RedAgentColor(AgentColor):
 
@@ -132,6 +136,11 @@ class RedAgentColor(AgentColor):
     def get_defensive_treshold(self):
         return 11, 14
 
+    @override
+    def get_spawn_treshold(self):
+        return 0, 4
+
+
 class BlueAgentColor(AgentColor):
 
     @override
@@ -141,6 +150,10 @@ class BlueAgentColor(AgentColor):
     @override
     def get_defensive_treshold(self):
         return 17, 21
+
+    @override
+    def get_spawn_treshold(self):
+        return 27, 31
 
 class GameInterpreter:
 
@@ -168,8 +181,6 @@ class GameInterpreter:
         else:
             initial_state = GameState.DEFENDING
             allowed_goals = [
-                AttackingGoal(self),
-                WanderGoal(self),
                 DefendingGoal(self),
                 DefensiveFleeingGoal(self)
             ]
@@ -181,15 +192,27 @@ class GameInterpreter:
         self.previous_game_state = self.game_state
         self.game_state = new_state
 
-        #print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
+        print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
 
     def set_position_path(self, path, reason):
-        #if path is not None:
-            #print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
-        #else:
-            #print("[", self.agent_index, "] Set new position with reason ", reason)
-
+        if path is not None:
+            print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
+        else:
+            print("[", self.agent_index, "] Set new position with reason ", reason)
+    
+        if self.position_path is not None:
+            self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))        
+        
+        if path is not None:
+            self.display_path(path.positions, format_color(1.0, 1.0, 1.0))
+        
         self.position_path = path
+        
+    def display_path(self, positions, color):
+        for position in positions:
+            point = Position.to_tuple(position)
+
+            circle(self.parent.display.to_screen(point=point), 10,  outline_color=color, fill_color=color, width=1)
 
     def is_position_safe(self, position):
         if position is None:
@@ -300,36 +323,53 @@ class GameInterpreter:
 
         return closest
 
+    # Returns an enemy in attacker territory (other)
     def get_valid_defensive_enemy(self, game_data, distance_threshold):
         current_position = game_data.current_position
         enemies = game_data.enemies
 
+        valid_enemies = list()
         for enemy in enemies:
             enemy_position = enemy["pos"]
             if enemy_position is None or self.is_position_safe(Position.from_tuple(enemy_position)):
                 continue
 
             distance = self.get_distance(current_position, Position.from_tuple(enemy_position))
-
             if distance > distance_threshold:
                 continue
 
-            return enemy
+            valid_enemies.append(enemy)
 
-        return None
+        if len(valid_enemies) <= 0:
+            return None
 
+        current_position = game_data.current_position
+        return min(
+            valid_enemies,
+            key=lambda item: self.get_distance(current_position, item["pos"])
+        )
+
+    # Returns an enemy in home territory (self)
     def get_valid_offensive_enemy(self, game_data):
         enemies = game_data.enemies
 
+        valid_enemies = list()
         for enemy in enemies:
             enemy_position = enemy["pos"]
 
             if enemy_position is None or not self.is_position_safe(Position.from_tuple(enemy_position)):
                 continue
+            
+            valid_enemies.append(enemy)
+            
+        if len(valid_enemies) <= 0:
+            return None
 
-            return enemy
-
-        return None
+        current_position = game_data.current_position
+        return min(
+            valid_enemies,
+            key=lambda item: self.get_distance(current_position, item["pos"])
+        )
 
     def get_random_defensive_position(self, game_data, origin, max_distance):
         defensive_treshold = self.game_data.agent_color.get_defensive_treshold()
@@ -345,9 +385,9 @@ class GameInterpreter:
                 continue
 
             distance = self.get_distance(origin, candidate)
-            if distance > max_distance:
+            if distance >= 1_000 or distance > max_distance:
                 continue
-
+                
             return candidate
 
         return None
@@ -531,23 +571,37 @@ class DefendingGoal(AgentGoal):
     def compute(self):
         if self.parent.game_state is not GameState.DEFENDING:
             return "Different goal active"
-
+    
         current_position = self.parent.game_data.current_position
+        # Initial movement to starting defense position
+        if current_position.is_x_between(self.parent.game_data.agent_color.get_spawn_treshold()) and self.parent.position_path is None:
+            random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
+            
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Initial defending position")
+            return "Moving to initial defending position"
+    
+        # If we're in enemy territory, move to our side
         if not self.parent.is_position_safe(current_position):
             self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, self.parent.last_safe_position), "Moving to defense")
 
-        # Actively pursue enemy
+        # Actively pursue enemy in home territory
         if self.parent.position_path is None or (self.parent.position_path is not None and not self.parent.position_path.is_completed()):
             updated_valid_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
 
-            if updated_valid_enemy is not None:
+            if updated_valid_enemy is not None: #and not updated_valid_enemy["isPacman"]:
                 self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(updated_valid_enemy["pos"])), "Updating chase position in home territory")
                 return "Updating chase position"
 
         nearby_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
-        if nearby_enemy is not None and not nearby_enemy["isPacman"]:
-            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(nearby_enemy["pos"])), "Chasing enemy in home territory")
-            return "Chasing enemy in home territory"
+        if nearby_enemy is not None:
+            if not nearby_enemy["isPacman"]:
+                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(nearby_enemy["pos"])), "Chasing enemy in home territory")
+                return "Chasing enemy in home territory"
+            #else:
+            #    # TODO: Find a random close position which moves away from the pursuing enemy
+            #    
+            #    self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, ))
+            #    return "Fleeing from the enemy in home territory"
 
         if self.parent.position_path is not None and not self.parent.position_path.is_completed():
             return "Already pursuing an active goal"
@@ -555,12 +609,8 @@ class DefendingGoal(AgentGoal):
         # Find a random defending position (reposition)
         random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 6)
         if random_defending_position is None:
-
-            # Find a random defensive position (Starting so doesn't matter what distance we check)
-            random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
-            if random_defending_position is None:
-                raise Exception("Random defensive position was somehow null?")
-
+            return "Invalid random defending position"
+        
         self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Moving to a new defensive position")
         return "Moving to a new defensive position"
 
@@ -593,50 +643,6 @@ class AttackingGoal(AgentGoal):
         self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(valid_enemy["pos"])), "Attacking enemy in home territory")
         return "Valid enemy found, attacking in home territory"
 
-class WanderGoal(AgentGoal):
-
-    @override
-    def __init__(self, parent):
-        super().__init__(parent)
-
-        self.wander_count = 0
-        self.wander_timeout = 0
-
-    @override
-    def compute(self):
-        if self.parent.game_state is not GameState.WANDER:
-            return "Different goal active"
-
-        # Handle wander timeout
-        if not self.handle_wander_timeout():
-            return "On wander timeout"
-
-        current_position = self.parent.game_data.current_position
-        if self.parent.position_path is not None and not self.parent.position_path.is_completed():
-            return "Already have an active path"
-
-        #print("Current: ", self.parent.position_path)
-
-        random_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
-        if random_position is None:
-            return "Random wander position was null"
-
-        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position), "Wandering to a random defensive position")
-        self.wander_count += 1
-        return "Wandering to a new defensive position"
-
-    def handle_wander_timeout(self):
-        # Some timeouts for wandering,
-        if self.wander_timeout >= 5 or self.wander_count <= 0:
-            self.wander_count = 0
-            return True
-
-        if self.wander_count >= 1:
-            self.wander_timeout += 1
-
-        return False
-
-
 class Position:
 
     @staticmethod
@@ -652,6 +658,9 @@ class Position:
 
     def to_tuple(self):
         return self.x, self.y
+
+    def is_x_between(self, treshold):
+        return treshold[0] <= self.x <= treshold[1]
 
     def __set_x__(self, x):
         return Position(self.x + x, self.y)
