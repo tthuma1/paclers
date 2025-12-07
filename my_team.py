@@ -186,6 +186,7 @@ class GameInterpreter:
         self.capsule = None
 
         if self.agent_index == 0:
+            self.path_color = format_color(0, 0.4, 0.4)
             initial_state = GameState.FINDING_FOOD
             allowed_goals = [
                 FindingFoodGoal(self),
@@ -194,6 +195,7 @@ class GameInterpreter:
                 AttackingGoal(self)
             ]
         else:
+            self.path_color = format_color(0.4, 0.4, 0)
             initial_state = GameState.DEFENDING
             allowed_goals = [
                 AttackingGoal(self),
@@ -220,7 +222,7 @@ class GameInterpreter:
             self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))        
         
         if path is not None:
-            self.display_path(path.positions, format_color(1.0, 1.0, 1.0))
+            self.display_path(path.positions, self.path_color)
         
         self.position_path = path
         
@@ -228,7 +230,7 @@ class GameInterpreter:
         for position in positions:
             point = Position.to_tuple(position)
 
-            circle(self.parent.display.to_screen(point=point), 10,  outline_color=color, fill_color=color, width=1)
+            circle(self.parent.display.to_screen(point=point), 3,  outline_color=color, fill_color=color, width=1)
 
     def is_position_safe(self, position):
         if position is None:
