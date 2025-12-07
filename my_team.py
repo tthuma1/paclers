@@ -8,7 +8,7 @@ from contest.capture_agents import CaptureAgent
 from contest.graphics_utils import circle, format_color
 
 
-def create_team(first_index, second_index, is_red, first='DummyAgent', second='CustomUniversalAgent', num_training=1):
+def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent', num_training=1):
     print("Agent 1: ", first_index, " Type: ", first)
     print("Agent 2: ", second_index, " Type: ", second)
 
@@ -101,6 +101,7 @@ class Capsule:
     def __init__(self, color, capsules):
         self.consumed = False
         self.position = None
+        self.capsule_active_time = 40
 
         for capsule in capsules:
             capsule_position = Position.from_tuple(capsule)
@@ -196,7 +197,6 @@ class GameInterpreter:
             initial_state = GameState.DEFENDING
             allowed_goals = [
                 AttackingGoal(self),
-                WanderGoal(self),
                 DefendingGoal(self),
                 DefensiveFleeingGoal(self)
             ]
