@@ -240,20 +240,20 @@ class GameInterpreter:
         self.previous_position = None
         self.previous_game_data = None
         self.collected_food = 0
-        
+
     def handle_capsule_state(self):
         current_position = self.game_data.current_position
         capsule_position = self.game_data.capsule.position
-    
+
         # Capsule was already consumed
         if self.game_data.capsule.consumed or self.game_data.capsule.position is None:
             return
-        
+
         if not current_position.__eq__(capsule_position):
             return
-        
+
         self.game_data.capsule.consumed = True
-        #print("Consumed capsule at ", current_position)
+        # print("Consumed capsule at ", current_position)
 
     def get_distance(self, from_position, to_position):
         if from_position.x > 32 and to_position.x > 32 and from_position.y < 0 and to_position.y < 0:
@@ -521,7 +521,7 @@ class OffensiveFleeingGoal(AgentGoal):
         # TODO: This is incorrect
         # if valid_enemy is not None and not valid_enemy["isPacman"] and self.parent.game_data.is_pacman:
         #     print("Enemy: ", valid_enemy, " Are we a pacman?: ", self.parent.game_data.is_pacman)
-#
+        #
         #     self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(valid_enemy["pos"])), "Pursuing enemy due to becoming a pacman")
         #     self.parent.set_game_state(GameState.ATTACKING)
         #     return "Switching to attack enemy as we've become a pacman"
@@ -624,15 +624,15 @@ class AttackingGoal(AgentGoal):
 
         current_position = self.parent.game_data.current_position
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 4)
-        #print("[", self.parent.agent_index, "]", valid_enemy)
-        
+        # print("[", self.parent.agent_index, "]", valid_enemy)
+
         if valid_enemy is not None and valid_enemy["isPacman"]:
             self.parent.set_game_state(self.parent.previous_game_state)
             return "Valid enemy is a pacman, setting to previous goal"
-        
+
         if valid_enemy is None:
             return "No valid enemy found"
-        
+
         if not valid_enemy["isPacman"]:
             return "Valid enemy is not a pacman"
 
