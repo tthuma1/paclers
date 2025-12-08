@@ -254,7 +254,7 @@ class GameInterpreter:
     def display_path(self, positions, color):
         for position in positions:
             point = Position.to_tuple(position)
-            circle(self.parent.display.to_screen(point=point), 3,  outline_color=color, fill_color=format_color(0, 0, 0), width=1)
+            # circle(self.parent.display.to_screen(point=point), 3,  outline_color=color, fill_color=format_color(0, 0, 0), width=1)
 
     def is_position_safe(self, position):
         if position is None:
@@ -418,6 +418,24 @@ class GameInterpreter:
             valid_enemies,
             key=lambda item: self.get_distance(current_position, item["pos"])
         )
+    
+    # enemies on their home territory
+    def get_enemy_ghost_positions(self, game_data):
+        ghost_positions = []
+        for enemy in game_data.enemies:
+            enemy_position = enemy["pos"]
+            is_pacman = enemy["isPacman"]
+            
+            if enemy_position is None or is_pacman:
+                continue
+            
+            # Ghost is on its home territory
+            if self.is_position_safe(Position.from_tuple(enemy_position)):
+                continue
+            
+            ghost_positions.append(Position.from_tuple(enemy_position))
+        
+        return ghost_positions
 
     def get_random_reposition_position(self, game_data, origin):
         return self.get_random_treshold_position(game_data, origin, game_data.agent_color.get_reposition_treshold(), 1_000)
@@ -474,9 +492,14 @@ class GameInterpreter:
                 move = Direction.from_position(current_position, next_step)
 
                 if move is not None and move.__str__() in legal_directions:
-                    self.previous_position = current_position
-                    self.previous_game_data = game_data
-                    return move
+                    # don't move into a position occupied by an enemy ghost
+                    enemy_ghosts = self.get_enemy_ghost_positions(game_data)
+                    if next_step not in enemy_ghosts:
+                        self.previous_position = current_position
+                        self.previous_game_data = game_data
+                        return move
+                    else:
+                        self.set_position_path(None, "Path blocked by enemy ghost")
 
             self.set_position_path(None, "Current finished, clearing (default)")
 
@@ -526,9 +549,10 @@ class FindingFoodGoal(AgentGoal):
         if self.parent.position_path is not None and not self.parent.position_path.is_completed() or closest_food_entry is None:
             return "Already executing food collection"
 
-        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(closest_food_entry[0])), "New food found")
-        return "Executing new food collection"
 
+        restricted = self.parent.get_enemy_ghost_positions(self.parent.game_data)
+        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(closest_food_entry[0]), restricted), "New food found")
+        return "Executing new food collection"
 
 class DepositingFoodGoal(AgentGoal):
 
@@ -583,6 +607,8 @@ class OffensiveFleeingGoal(AgentGoal):
 
         if self.parent.position_path is None or self.parent.position_path is not None and self.parent.position_path.is_completed():
             restricted = [self.parent.previous_position]
+            restricted.extend(self.parent.get_enemy_ghost_positions(self.parent.game_data))
+
             random_position = self.parent.get_random_reposition_position(self.parent.game_data, current_position)
 
             self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position, restricted), "Being sm0rt and not falling for the good old switcheroo", show=True)
@@ -592,6 +618,8 @@ class OffensiveFleeingGoal(AgentGoal):
             return "Skipping fleeing, as we're already fleeing"
 
         restricted = [Position.from_tuple(valid_enemy["pos"])]
+        restricted.extend(self.parent.get_enemy_ghost_positions(self.parent.game_data))
+
         closest_safe = self.parent.get_closest_safe_position(current_position, restricted)
         
         self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Offensive)", show=True)
