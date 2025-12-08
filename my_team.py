@@ -95,30 +95,28 @@ class GameData:
         self.is_scared = agent_state.scared_timer > 0
         self.enemies = enemies
         self.walls = walls
+        self.capsules = []
 
         if is_red:
             self.agent_color = RedAgentColor("red")
         else:
             self.agent_color = BlueAgentColor("blue")
 
-        self.capsule = Capsule(self.agent_color, capsules)
-
-class Capsule:
-
-    def __init__(self, color, capsules):
-        self.consumed = False
-        self.position = None
-        self.capsule_active_time = 40
-        self.capsule_expended = False
-
         for capsule in capsules:
             capsule_position = Position.from_tuple(capsule)
 
-            if color.is_position_on_safe_side(capsule_position):
+            if self.agent_color.is_position_on_safe_side(capsule_position):
                 continue
 
-            self.position = capsule_position
-            break
+            self.capsules.append(Capsule(capsule_position))
+
+class Capsule:
+
+    def __init__(self, position):
+        self.consumed = False
+        self.position = None
+        self.capsule_active_time = 40
+        self.position = position
 
     def eat_capsule(self, interpreter):
         self.consumed = True
@@ -131,7 +129,7 @@ class Capsule:
         self.capsule_active_time -= 1
 
         if self.capsule_active_time <= 0:
-            self.capsule_expended = True
+            interpreter.expired_capsule = True
             interpreter.set_game_state(interpreter.previous_game_state)
 
 class AgentColor:
@@ -203,7 +201,8 @@ class GameInterpreter:
         self.previous_position = None
         self.collected_food = 0
         self.encounter_counter = 0
-        self.capsule = None
+        self.capsules = None
+        self.expired_capsule = False
 
         if self.agent_index == 0:
             self.path_color = format_color(0, 0.4, 0.4)
@@ -283,25 +282,29 @@ class GameInterpreter:
         self.previous_game_data = None
         self.collected_food = 0
         
-    def handle_capsule_state(self):
-        if self.capsule is None:
-            self.capsule = self.game_data.capsule
-
-        if self.game_data.capsule.position is not None:
+    def handle_capsule_state(self, capsule):
+        if capsule.consumed:
             return
 
-        if self.get_distance(self.capsule.position, self.game_data.current_position) > 2:
+        found = False
+        for game_data_capsule in self.game_data.capsules:
+            if capsule.position == game_data_capsule.position:
+                found = True
+
+        if found:
             return
 
-        if self.capsule.capsule_active_time <= 0:
+        if self.get_distance(capsule.position, self.game_data.current_position) > 2:
             return
 
-        if not self.capsule.consumed and self.game_state is not GameState.ATTACKING:
-            self.capsule.eat_capsule(self)
+        if capsule.capsule_active_time <= 0:
             return
 
-        self.capsule.decrease_time(self)
+        if self.game_state is not GameState.ATTACKING:
+            capsule.eat_capsule(self)
+            return
 
+        capsule.decrease_time(self)
 
     def get_distance(self, from_position, to_position):
         if from_position.x > 32 and to_position.x > 32 and from_position.y < 0 and to_position.y < 0:
@@ -458,7 +461,12 @@ class GameInterpreter:
             self.last_safe_position = current_position
 
         self.handle_death()
-        self.handle_capsule_state()
+
+        if self.capsules is None:
+            self.capsules = self.game_data.capsules
+
+        for capsule in self.capsules:
+            self.handle_capsule_state(capsule)
 
         detailed_move = defaultdict()
         for goal in self.allowed_goals:
@@ -708,21 +716,23 @@ class CapsuleFindGoal(AgentGoal):
     
     @override
     def compute(self):
-        if self.parent.capsule.capsule_expended and self.parent.game_state is GameState.ATTACKING:
+        if self.parent.expired_capsule and self.parent.game_state is GameState.ATTACKING:
             self.parent.set_game_state(self.parent.previous_game_state)
+            self.parent.expired_capsule = False
             return "Resetting state as we've expended the capsule"
         
-        if self.parent.game_state is GameState.FINDING_CAPSULE or self.parent.capsule.consumed:
+        if self.parent.game_state is GameState.FINDING_CAPSULE:
             return "Already finding capsule or eaten"
 
-        capsule_position = self.parent.capsule.position
-        current_position = self.parent.game_data.current_position
-        distance = self.parent.get_distance(capsule_position, current_position)
+        for capsule in self.parent.capsules:
+            capsule_position = capsule.position
+            current_position = self.parent.game_data.current_position
+            distance = self.parent.get_distance(capsule_position, current_position)
 
-        if distance <= 3:
-            self.parent.set_game_state(GameState.FINDING_CAPSULE)
-            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, capsule_position), "Moving to the capsule position")
-            return "Finding Capsule"
+            if distance <= 3:
+                self.parent.set_game_state(GameState.FINDING_CAPSULE)
+                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, capsule_position), "Moving to the capsule position")
+                return "Finding Capsule"
 
         return "Capsule is not close enough, ignoring"
 
