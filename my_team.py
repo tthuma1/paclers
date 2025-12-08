@@ -660,7 +660,10 @@ class DefendingGoal(AgentGoal):
             return "Already pursuing an active goal"
 
         # Find a random defending position (reposition)
-        random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 6)        
+        random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 6)
+        if random_defending_position is None:
+            return "Invalid random defending position"
+        
         self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Moving to a new defensive position")
         return "Moving to a new defensive position"
 
