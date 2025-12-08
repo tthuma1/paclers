@@ -1,5 +1,6 @@
 import heapq
 import random
+import time
 from collections import defaultdict
 from enum import Enum, auto
 from typing import override
@@ -8,7 +9,7 @@ from contest.capture_agents import CaptureAgent
 from contest.graphics_utils import circle, format_color
 
 
-def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='DummyAgent', num_training=1):
+def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent', num_training=1):
     print("Agent 1: ", first_index, " Type: ", first)
     print("Agent 2: ", second_index, " Type: ", second)
 
@@ -29,6 +30,7 @@ class DummyAgent(CaptureAgent):
 
 class CustomUniversalAgent(CaptureAgent):
     mapped_moves = defaultdict(list)
+    execution_time = defaultdict(list)
     mapped_decisions = defaultdict(list)
 
     def __init__(self, index, agent_index, is_red, time_for_computing=.1):
@@ -40,7 +42,8 @@ class CustomUniversalAgent(CaptureAgent):
         self.interpreter = GameInterpreter(agent_index, self)
 
     def final(self, game_state):
-        print("Agent ", self.agent_index, " made ", self.move_count, " moves")
+        print("Agent ", self.agent_index, " made ", self.move_count, " moves, Average move time: %.7f" % (sum(CustomUniversalAgent.execution_time[self.agent_index]) / self.move_count), 
+              ", Longest Move: %.7f" % (max(CustomUniversalAgent.execution_time[self.agent_index])))
         # print("Mapped Moves:", CustomUniversalAgent.mapped_moves[self.agent_index])
         # print("Mapped Decisions", CustomUniversalAgent.mapped_decisions[self.agent_index])
 
@@ -49,6 +52,7 @@ class CustomUniversalAgent(CaptureAgent):
         CaptureAgent.register_initial_state(self, game_state)
 
     def choose_action(self, game_state):
+        start = time.time()
         actions = game_state.get_legal_actions(self.index)
 
         next_move = self.interpreter.compute_next_move(GameData(
@@ -76,7 +80,8 @@ class CustomUniversalAgent(CaptureAgent):
             actual_move = next_move.__str__().strip()
 
         self.move_count += 1
-        CustomUniversalAgent.mapped_moves[self.index].append(actual_move)
+        CustomUniversalAgent.mapped_moves[self.agent_index].append(actual_move)
+        CustomUniversalAgent.execution_time[self.agent_index].append(time.time() - start)
         return actual_move
 
 class GameData:
@@ -228,13 +233,13 @@ class GameInterpreter:
         self.previous_game_state = self.game_state
         self.game_state = new_state
 
-        print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
+        #print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
 
     def set_position_path(self, path, reason, show=False):
-        if path is not None:
-            print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
-        else:
-            print("[", self.agent_index, "] Set new position with reason ", reason)
+        #if path is not None:
+        #    print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
+        #else:
+        #    print("[", self.agent_index, "] Set new position with reason ", reason)
     
         if self.position_path is not None and self.displayed_previous_path:
             self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
@@ -291,7 +296,7 @@ class GameInterpreter:
         if self.capsule.capsule_active_time <= 0:
             return
 
-        if not self.capsule.consumed:
+        if not self.capsule.consumed and self.game_state is not GameState.ATTACKING:
             self.capsule.eat_capsule(self)
             return
 
@@ -518,7 +523,7 @@ class FindingFoodGoal(AgentGoal):
             self.parent.collected_food += 1
 
         if self.parent.collected_food >= 5 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (closest_food_entry is not None and closest_food_entry[1] >= 2):
-            print("Depositing food")
+            #print("Depositing food")
             self.parent.set_game_state(GameState.DEPOSITING_FOOD)
             return "Collected at least 5 food, returning home to deposit"
 
@@ -562,7 +567,7 @@ class OffensiveFleeingGoal(AgentGoal):
     @override
     def compute(self):
         if self.parent.game_state is GameState.ATTACKING:
-            print("Attacking")
+            #print("Attacking")
             return "Attacking, no need to flee"
 
         current_position = self.parent.game_data.current_position
@@ -570,7 +575,7 @@ class OffensiveFleeingGoal(AgentGoal):
         if self.parent.game_state is GameState.OFFENSIVE_FLEEING:
             if valid_enemy is None or self.parent.is_position_safe(current_position):
                 self.parent.set_game_state(self.parent.previous_game_state)
-                print("Resetting state")
+                #print("Resetting state")
                 return "Resetting state as we're no longer in danger"
 
         if valid_enemy is None:
@@ -582,7 +587,7 @@ class OffensiveFleeingGoal(AgentGoal):
             random_position = self.parent.get_random_reposition_position(self.parent.game_data, current_position)
 
             self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position, restricted), "Being sm0rt and not falling for the good old switcheroo", show=True)
-            print("Switcheroo ", random_position)
+            #print("Switcheroo ", random_position)
             return "Being sm0rt and not falling for the good old switcheroo"
         
         if self.parent.is_position_safe(current_position):
@@ -597,7 +602,7 @@ class OffensiveFleeingGoal(AgentGoal):
         self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Offensive)", show=True)
         self.parent.set_game_state(GameState.OFFENSIVE_FLEEING)
         self.parent.encounter_counter += 1
-        print("Fleeing")
+        #print("Fleeing")
         return "Found a valid enemy, fleeing"
 
 
