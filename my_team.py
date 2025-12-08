@@ -123,9 +123,6 @@ class Capsule:
         interpreter.set_game_state(GameState.ATTACKING)
 
     def decrease_time(self, interpreter):
-        if self.capsule_expended:
-            return
-        
         self.capsule_active_time -= 1
 
         if self.capsule_active_time <= 0:
@@ -232,21 +229,21 @@ class GameInterpreter:
         self.previous_game_state = self.game_state
         self.game_state = new_state
 
-        #print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
+        print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
 
     def set_position_path(self, path, reason, show=False):
-        #if path is not None:
-        #    print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
-        #else:
-        #    print("[", self.agent_index, "] Set new position with reason ", reason)
+        if path is not None:
+            print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
+        else:
+            print("[", self.agent_index, "] Set new position with reason ", reason)
     
-        if self.position_path is not None and self.displayed_previous_path:
-            self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
-            self.displayed_previous_path = False
-    
-        if path is not None and show:
-            self.display_path(path.positions, self.path_color)
-            self.displayed_previous_path = True
+        #if self.position_path is not None and self.displayed_previous_path:
+        #    self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
+        #    self.displayed_previous_path = False
+    #
+        #if path is not None and show:
+        #    self.display_path(path.positions, self.path_color)
+        #    self.displayed_previous_path = True
         
         self.position_path = path
         
@@ -551,6 +548,9 @@ class DepositingFoodGoal(AgentGoal):
 
         if self.parent.game_state is not GameState.DEPOSITING_FOOD:
             return "Different goal active"
+        
+        if self.parent.is_position_safe(current_position) or self.parent.collected_food <= 0:
+            return "Already in a safe position or no food"
 
         if self.parent.position_path is None or not self.parent.position_path.is_completed():
             closest_safe = self.parent.get_closest_safe_position(current_position)
@@ -676,7 +676,6 @@ class DefendingGoal(AgentGoal):
         self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Moving to a new defensive position")
         return "Moving to a new defensive position"
 
-
 class AttackingGoal(AgentGoal):
 
     @override
@@ -695,7 +694,7 @@ class AttackingGoal(AgentGoal):
             return "Found enemy that was already eaten, run"
         
         target_pos = Position.from_tuple(valid_enemy["pos"])
-        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, target_pos),"Attacking visible enemy")
+        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, target_pos), "Attacking visible enemy")
 
         return "Attacking visible enemy"
 
@@ -713,11 +712,16 @@ class CapsuleFindGoal(AgentGoal):
             return "Already finding capsule or eaten"
 
         for capsule in self.parent.capsules:
+            if capsule.consumed:
+                continue
+            
             capsule_position = capsule.position
             current_position = self.parent.game_data.current_position
             distance = self.parent.get_distance(capsule_position, current_position)
 
             if distance <= 3:
+                print(self.parent.agent_index, " Setting to find capsule")
+                
                 self.parent.set_game_state(GameState.FINDING_CAPSULE)
                 self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, capsule_position), "Moving to the capsule position")
                 return "Finding Capsule"
