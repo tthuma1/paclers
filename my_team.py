@@ -42,8 +42,9 @@ class CustomUniversalAgent(CaptureAgent):
         self.interpreter = GameInterpreter(agent_index, self)
 
     def final(self, game_state):
-        print("Agent ", self.agent_index, " made ", self.move_count, " moves, Average move time: %.7f" % (sum(CustomUniversalAgent.execution_time[self.agent_index]) / self.move_count),
-              ", Longest Move: %.7f" % (max(CustomUniversalAgent.execution_time[self.agent_index])))
+        return
+        # print("Agent ", self.agent_index, " made ", self.move_count, " moves, Average move time: %.7f" % (sum(CustomUniversalAgent.execution_time[self.agent_index]) / self.move_count),
+        #       ", Longest Move: %.7f" % (max(CustomUniversalAgent.execution_time[self.agent_index])))
         # print("Mapped Moves:", CustomUniversalAgent.mapped_moves[self.agent_index])
         # print("Mapped Decisions", CustomUniversalAgent.mapped_decisions[self.agent_index])
 
