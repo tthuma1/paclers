@@ -9,10 +9,9 @@ from contest.capture_agents import CaptureAgent
 from contest.graphics_utils import circle, format_color
 
 
-def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent',
-                num_training=1):
-    # print("Agent 1: ", first_index, " Type: ", first)
-    # print("Agent 2: ", second_index, " Type: ", second)
+def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent', num_training=1):
+    print("Agent 1: ", first_index, " Type: ", first)
+    print("Agent 2: ", second_index, " Type: ", second)
 
     return [eval(first)(first_index, 0, is_red), eval(second)(second_index, 1, is_red)]
 
@@ -42,12 +41,11 @@ class CustomUniversalAgent(CaptureAgent):
         self.move_count = 0
         self.interpreter = GameInterpreter(agent_index, self)
 
-    #def final(self, game_state):
-
-    # print("Agent ", self.agent_index, " made ", self.move_count, " moves, Average move time: %.7f" % (sum(CustomUniversalAgent.execution_time[self.agent_index]) / self.move_count),
-    #      ", Longest Move: %.7f" % (max(CustomUniversalAgent.execution_time[self.agent_index])))
-    # print("Mapped Moves:", CustomUniversalAgent.mapped_moves[self.agent_index])
-    # print("Mapped Decisions", CustomUniversalAgent.mapped_decisions[self.agent_index])
+    def final(self, game_state):
+        print("Agent ", self.agent_index, " made ", self.move_count, " moves, Average move time: %.7f" % (sum(CustomUniversalAgent.execution_time[self.agent_index]) / self.move_count),
+              ", Longest Move: %.7f" % (max(CustomUniversalAgent.execution_time[self.agent_index])))
+        # print("Mapped Moves:", CustomUniversalAgent.mapped_moves[self.agent_index])
+        # print("Mapped Decisions", CustomUniversalAgent.mapped_decisions[self.agent_index])
 
     def register_initial_state(self, game_state):
         self.start = game_state.get_agent_position(self.index)
@@ -86,11 +84,9 @@ class CustomUniversalAgent(CaptureAgent):
         CustomUniversalAgent.execution_time[self.agent_index].append(time.time() - start)
         return actual_move
 
-
 class GameData:
 
-    def __init__(self, is_red, legal_moves, game_state, food_positions, current_position, agent_state, enemies,
-                 capsules, walls):
+    def __init__(self, is_red, legal_moves, game_state, food_positions, current_position, agent_state, enemies, capsules, walls):
         self.legal_moves = legal_moves
         self.game_state = game_state
         self.food_positions = food_positions
@@ -114,7 +110,6 @@ class GameData:
 
             self.capsules.append(Capsule(capsule_position))
 
-
 class Capsule:
 
     def __init__(self, position):
@@ -134,7 +129,6 @@ class Capsule:
             interpreter.expired_capsule = True
             interpreter.set_game_state(GameState.FINDING_FOOD)
             self.position = None
-
 
 class AgentColor:
 
@@ -191,7 +185,6 @@ class BlueAgentColor(AgentColor):
     def get_spawn_treshold(self):
         return 27, 32
 
-
 class GameInterpreter:
 
     def __init__(self, agent_index, parent):
@@ -238,19 +231,19 @@ class GameInterpreter:
         self.previous_game_state = self.game_state
         self.game_state = new_state
 
-        # print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
+        print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
 
     def set_position_path(self, path, reason, show=False):
-        # if path is not None:
-        # #   print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
-        # else:
-        #    print("[", self.agent_index, "] Set new position with reason ", reason)
+        if path is not None:
+            print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
+        else:
+            print("[", self.agent_index, "] Set new position with reason ", reason)
 
-        # if self.position_path is not None and self.displayed_previous_path:
+        #if self.position_path is not None and self.displayed_previous_path:
         #    self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
         #    self.displayed_previous_path = False
-        #
-        # if path is not None and show:
+#
+        #if path is not None and show:
         #    self.display_path(path.positions, self.path_color)
         #    self.displayed_previous_path = True
 
@@ -259,8 +252,7 @@ class GameInterpreter:
     def display_path(self, positions, color):
         for position in positions:
             point = Position.to_tuple(position)
-            circle(self.parent.display.to_screen(point=point), 3, outline_color=color, fill_color=format_color(0, 0, 0),
-                   width=1)
+            circle(self.parent.display.to_screen(point=point), 3,  outline_color=color, fill_color=format_color(0, 0, 0), width=1)
 
     def is_position_safe(self, position):
         if position is None:
@@ -437,12 +429,10 @@ class GameInterpreter:
         )
 
     def get_random_reposition_position(self, game_data, origin):
-        return self.get_random_treshold_position(game_data, origin, game_data.agent_color.get_reposition_treshold(),
-                                                 1_000)
+        return self.get_random_treshold_position(game_data, origin, game_data.agent_color.get_reposition_treshold(), 1_000)
 
     def get_random_defensive_position(self, game_data, origin, max_distance):
-        return self.get_random_treshold_position(game_data, origin, game_data.agent_color.get_defensive_treshold(),
-                                                 max_distance)
+        return self.get_random_treshold_position(game_data, origin, game_data.agent_color.get_defensive_treshold(), max_distance)
 
     def get_random_treshold_position(self, game_data, origin, treshold, max_distance):
         empty_spaces = self.get_empty_spaces(min_x=treshold[0], max_x=treshold[1])
@@ -540,28 +530,23 @@ class FindingFoodGoal(AgentGoal):
             self.parent.set_position_path(closest_safe, "All food has been consumed, returning home")
             return "All food has been collected, returning home"
 
-        is_food_square = self.parent.previous_game_data is not None and Position.to_tuple(
-            current_position) in self.parent.previous_game_data.food_positions
+        is_food_square = self.parent.previous_game_data is not None and Position.to_tuple(current_position) in self.parent.previous_game_data.food_positions
         if is_food_square:
             self.parent.collected_food += 1
 
-        if self.parent.collected_food >= 5 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (
-                closest_food_entry is not None and closest_food_entry[1] >= 2):
+        if self.parent.collected_food >= 3 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (closest_food_entry is not None and closest_food_entry[1] >= 2):
             self.parent.set_game_state(GameState.DEPOSITING_FOOD)
-            return "Collected at least 5 food, returning home to deposit"
+            return "Collected at least 3 food, returning home to deposit"
 
         if self.parent.position_path is not None and not self.parent.position_path.is_completed() or closest_food_entry is None:
             return "Already executing food collection"
 
-        food_position_path = PositionPath(self.parent.game_data, current_position,
-                                          Position.from_tuple(closest_food_entry[0]), self.parent.restricted_positions)
+        food_position_path = PositionPath(self.parent.game_data, current_position, Position.from_tuple(closest_food_entry[0]), self.parent.restricted_positions)
         if food_position_path.is_empty():
             remaining_food.remove(closest_food_entry[0])
             closest_food_entry = self.parent.get_closest_food(current_position, remaining_food)
 
-        self.parent.set_position_path(
-            PositionPath(self.parent.game_data, current_position, Position.from_tuple(closest_food_entry[0]),
-                         self.parent.restricted_positions), "New food found")
+        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(closest_food_entry[0]), self.parent.restricted_positions), "New food found")
         return "Executing new food collection"
 
 
@@ -623,9 +608,7 @@ class OffensiveFleeingGoal(AgentGoal):
             restricted = [self.parent.previous_position]
             random_position = self.parent.get_random_reposition_position(self.parent.game_data, current_position)
 
-            self.parent.set_position_path(
-                PositionPath(self.parent.game_data, current_position, random_position, restricted),
-                "Being sm0rt and not falling for the good old switcheroo", show=True)
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position, restricted), "Being sm0rt and not falling for the good old switcheroo", show=True)
             return "Being sm0rt and not falling for the good old switcheroo"
 
         if self.parent.game_state is GameState.OFFENSIVE_FLEEING:
@@ -669,28 +652,19 @@ class DefendingGoal(AgentGoal):
         current_position = self.parent.game_data.current_position
 
         # Initial movement to starting defense position
-        if current_position.is_x_between(
-                self.parent.game_data.agent_color.get_spawn_treshold()) and self.parent.position_path is None:
-            random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data,
-                                                                                  current_position, 1_000)
-            self.parent.set_position_path(
-                PositionPath(self.parent.game_data, current_position, random_defending_position),
-                "Initial defending position")
+        if current_position.is_x_between(self.parent.game_data.agent_color.get_spawn_treshold()) and self.parent.position_path is None:
+            random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Initial defending position")
             return "Moving to initial defending position"
 
         # If we're in enemy territory, move to our side
         if not self.parent.is_position_safe(current_position):
-            self.parent.set_position_path(
-                PositionPath(self.parent.game_data, current_position, self.parent.last_safe_position),
-                "Moving to defense")
+            self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, self.parent.last_safe_position), "Moving to defense")
 
         nearby_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
-        if nearby_enemy is not None and (
-                self.parent.position_path is None or not self.parent.position_path.is_completed()):
+        if nearby_enemy is not None and (self.parent.position_path is None or not self.parent.position_path.is_completed()):
             if not self.parent.game_data.is_scared:
-                self.parent.set_position_path(
-                    PositionPath(self.parent.game_data, current_position, Position.from_tuple(nearby_enemy["pos"])),
-                    "Chasing enemy in home territory")
+                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(nearby_enemy["pos"])), "Chasing enemy in home territory")
                 return "Chasing enemy in home territory"
 
             restricted = [Position.from_tuple(nearby_enemy["pos"])]
@@ -700,29 +674,23 @@ class DefendingGoal(AgentGoal):
             return "Fleeing from the enemy in home territory"
 
         # Actively pursue enemy in home territory
-        if self.parent.position_path is None or (
-                self.parent.position_path is not None and not self.parent.position_path.is_completed()):
+        if self.parent.position_path is None or (self.parent.position_path is not None and not self.parent.position_path.is_completed()):
             updated_valid_enemy = self.parent.get_valid_offensive_enemy(self.parent.game_data)
 
             if updated_valid_enemy is not None and not self.parent.game_data.is_scared:
-                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position,
-                                                           Position.from_tuple(updated_valid_enemy["pos"])),
-                                              "Updating chase position in home territory")
+                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(updated_valid_enemy["pos"])), "Updating chase position in home territory")
                 return "Updating chase position"
 
         if self.parent.position_path is not None and not self.parent.position_path.is_completed():
             return "Already pursuing an active goal"
 
         # Find a random defending position (reposition)
-        random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position,
-                                                                              6)
+        random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 10)
         if random_defending_position is None:
             return "Invalid random defending position"
 
-        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position),
-                                      "Moving to a new defensive position")
+        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Moving to a new defensive position")
         return "Moving to a new defensive position"
-
 
 class AttackingGoal(AgentGoal):
 
@@ -742,8 +710,7 @@ class AttackingGoal(AgentGoal):
             return "Found enemy that was already eaten, run"
 
         target_pos = Position.from_tuple(valid_enemy["pos"])
-        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, target_pos),
-                                      "Attacking visible enemy")
+        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, target_pos), "Attacking visible enemy")
 
         return "Attacking visible enemy"
 
@@ -772,14 +739,13 @@ class CapsuleFindGoal(AgentGoal):
             distance = self.parent.get_distance(capsule_position, current_position)
 
             if distance <= 3:
-                # print(self.parent.agent_index, " Setting to find capsule")
+                print(self.parent.agent_index, " Setting to find capsule")
+                print("pojedu")
                 self.parent.set_game_state(GameState.FINDING_CAPSULE)
-                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, capsule_position),
-                                              "Moving to the capsule position")
+                self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, capsule_position), "Moving to the capsule position")
                 return "Finding Capsule"
 
         return "Capsule is not close enough, ignoring"
-
 
 class Position:
 
