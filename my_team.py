@@ -534,9 +534,9 @@ class FindingFoodGoal(AgentGoal):
         if is_food_square:
             self.parent.collected_food += 1
 
-        if self.parent.collected_food >= 5 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (closest_food_entry is not None and closest_food_entry[1] >= 2):
+        if self.parent.collected_food >= 3 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (closest_food_entry is not None and closest_food_entry[1] >= 2):
             self.parent.set_game_state(GameState.DEPOSITING_FOOD)
-            return "Collected at least 5 food, returning home to deposit"
+            return "Collected at least 3 food, returning home to deposit"
 
         if self.parent.position_path is not None and not self.parent.position_path.is_completed() or closest_food_entry is None:
             return "Already executing food collection"
@@ -685,7 +685,7 @@ class DefendingGoal(AgentGoal):
             return "Already pursuing an active goal"
 
         # Find a random defending position (reposition)
-        random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 6)
+        random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 10)
         if random_defending_position is None:
             return "Invalid random defending position"
         
