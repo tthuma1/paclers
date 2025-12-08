@@ -235,11 +235,10 @@ class GameInterpreter:
         # print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
 
     def set_position_path(self, path, reason, show=False):
-        return
-        # if path is not None:
-        #     print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
-        # else:
-        #     print("[", self.agent_index, "] Set new position with reason ", reason)
+        if path is not None:
+            print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
+        else:
+            print("[", self.agent_index, "] Set new position with reason ", reason)
 
         #if self.position_path is not None and self.displayed_previous_path:
         #    self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
