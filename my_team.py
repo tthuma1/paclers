@@ -10,8 +10,8 @@ from contest.graphics_utils import circle, format_color
 
 
 def create_team(first_index, second_index, is_red, first='CustomUniversalAgent', second='CustomUniversalAgent', num_training=1):
-    print("Agent 1: ", first_index, " Type: ", first)
-    print("Agent 2: ", second_index, " Type: ", second)
+    # print("Agent 1: ", first_index, " Type: ", first)
+    # print("Agent 2: ", second_index, " Type: ", second)
 
     return [eval(first)(first_index, 0, is_red), eval(second)(second_index, 1, is_red)]
 
@@ -231,13 +231,14 @@ class GameInterpreter:
         self.previous_game_state = self.game_state
         self.game_state = new_state
 
-        print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
+        # print("[", self.agent_index, "] New Game State: ", self.game_state, " (", self.previous_game_state, ")")
 
     def set_position_path(self, path, reason, show=False):
-        if path is not None:
-            print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
-        else:
-            print("[", self.agent_index, "] Set new position with reason ", reason)
+        return
+        # if path is not None:
+        #     print("[", self.agent_index, "] Set new position with destination '", path.destination, "' and reason ", reason)
+        # else:
+        #     print("[", self.agent_index, "] Set new position with reason ", reason)
 
         #if self.position_path is not None and self.displayed_previous_path:
         #    self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
@@ -739,8 +740,8 @@ class CapsuleFindGoal(AgentGoal):
             distance = self.parent.get_distance(capsule_position, current_position)
 
             if distance <= 3:
-                print(self.parent.agent_index, " Setting to find capsule")
-                print("pojedu")
+                # print(self.parent.agent_index, " Setting to find capsule")
+                # print("pojedu")
                 self.parent.set_game_state(GameState.FINDING_CAPSULE)
                 self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, capsule_position), "Moving to the capsule position")
                 return "Finding Capsule"
