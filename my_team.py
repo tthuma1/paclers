@@ -709,10 +709,16 @@ class CapsuleFindGoal(AgentGoal):
             self.parent.expired_capsule = False
             return "Resetting state as we've expended the capsule"
 
+        if self.parent.game_state is GameState.ATTACKING:
+            return "Already attacking, no need to search for new capsule"
+
         if self.parent.game_state is GameState.FINDING_CAPSULE:
             return "Already finding capsule or eaten"
 
         for capsule in self.parent.capsules:
+            if capsule.consumed:
+                continue
+
             capsule_position = capsule.position
             current_position = self.parent.game_data.current_position
             distance = self.parent.get_distance(capsule_position, current_position)
