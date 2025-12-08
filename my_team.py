@@ -160,11 +160,11 @@ class RedAgentColor(AgentColor):
 
     @override
     def get_defensive_treshold(self):
-        return 11, 14
+        return 11, 15
 
     @override
     def get_reposition_treshold(self):
-        return 13, 14
+        return 15, 16
 
     @override
     def get_spawn_treshold(self):
@@ -179,7 +179,7 @@ class BlueAgentColor(AgentColor):
 
     @override
     def get_defensive_treshold(self):
-        return 17, 21
+        return 18, 22
 
     @override
     def get_reposition_treshold(self):
@@ -202,7 +202,6 @@ class GameInterpreter:
         self.starting_position = None
         self.previous_position = None
         self.collected_food = 0
-        self.encounter_counter = 0
         self.capsule = None
 
         if self.agent_index == 0:
@@ -277,11 +276,11 @@ class GameInterpreter:
             return
 
         self.game_state = GameState.FINDING_FOOD
-        self.set_position_path(None, "Agent died, clearing")
         self.last_safe_position = None
         self.previous_position = None
         self.previous_game_data = None
         self.collected_food = 0
+        self.set_position_path(None, "Agent died, clearing")
         
     def handle_capsule_state(self):
         if self.capsule is None:
@@ -358,7 +357,6 @@ class GameInterpreter:
                 continue
 
             position_path = PositionPath(self.game_data, current_position, position, restricted)
-
             if position_path.is_empty():
                 continue
 
@@ -613,8 +611,7 @@ class DefensiveFleeingGoal(AgentGoal):
             return "No valid enemy or pacman"
 
         closest_safe = self.parent.get_closest_safe_position(current_position)
-        if closest_safe is not None:
-            self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Defensive)")
+        self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Defensive)")
 
         self.parent.set_game_state(GameState.DEFENSIVE_FLEEING)
         return "Found a valid enemy, fleeing"
@@ -663,10 +660,7 @@ class DefendingGoal(AgentGoal):
             return "Already pursuing an active goal"
 
         # Find a random defending position (reposition)
-        random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 6)
-        if random_defending_position is None:
-            return "Invalid random defending position"
-        
+        random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 6)        
         self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Moving to a new defensive position")
         return "Moving to a new defensive position"
 
