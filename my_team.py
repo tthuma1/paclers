@@ -154,15 +154,15 @@ class RedAgentColor(AgentColor):
 
     @override
     def is_position_on_safe_side(self, position):
-        return position.x <= 15
+        return position.x <= 16
 
     @override
     def get_defensive_treshold(self):
-        return 11, 14
+        return 11, 15
 
     @override
     def get_reposition_treshold(self):
-        return 13, 14
+        return 15, 16
 
     @override
     def get_spawn_treshold(self):
@@ -173,11 +173,11 @@ class BlueAgentColor(AgentColor):
 
     @override
     def is_position_on_safe_side(self, position):
-        return position.x >= 16
+        return position.x >= 17
 
     @override
     def get_defensive_treshold(self):
-        return 17, 21
+        return 18, 22
 
     @override
     def get_reposition_treshold(self):
@@ -185,7 +185,7 @@ class BlueAgentColor(AgentColor):
 
     @override
     def get_spawn_treshold(self):
-        return 27, 31
+        return 27, 32
 
 class GameInterpreter:
 
@@ -208,9 +208,9 @@ class GameInterpreter:
             self.path_color = format_color(0, 0.4, 0.4)
             initial_state = GameState.FINDING_FOOD
             allowed_goals = [
-                CapsuleFindGoal(self),
                 FindingFoodGoal(self),
                 DepositingFoodGoal(self),
+                CapsuleFindGoal(self),
                 AttackingGoal(self),
                 OffensiveFleeingGoal(self)
             ]
@@ -276,12 +276,12 @@ class GameInterpreter:
             return
 
         self.game_state = GameState.FINDING_FOOD
-        self.set_position_path(None, "Agent died, clearing")
         self.last_safe_position = None
         self.previous_position = None
         self.previous_game_data = None
         self.collected_food = 0
-        
+        self.set_position_path(None, "Agent died, clearing")
+
     def handle_capsule_state(self, capsule):
         if capsule.consumed:
             return
@@ -361,7 +361,6 @@ class GameInterpreter:
                 continue
 
             position_path = PositionPath(self.game_data, current_position, position, restricted)
-
             if position_path.is_empty():
                 continue
 
@@ -431,7 +430,7 @@ class GameInterpreter:
     def get_random_treshold_position(self, game_data, origin, treshold, max_distance):
         empty_spaces = self.get_empty_spaces(min_x=treshold[0], max_x=treshold[1])
     
-        for _ in range(50):
+        for _ in range(100):
             candidate = random.choice(empty_spaces)
     
             if candidate == origin:
@@ -473,7 +472,6 @@ class GameInterpreter:
             compute_result = goal.compute()
             detailed_move[goal.__class__] = compute_result
 
-        #print(self.agent_index, " ", detailed_move)
         CustomUniversalAgent.mapped_decisions[self.agent_index].append(detailed_move)
 
         if self.position_path is not None:
@@ -487,7 +485,7 @@ class GameInterpreter:
                     self.previous_game_data = game_data
                     return move
 
-            self.set_position_path(None, "Current finished, clearing")
+            self.set_position_path(None, "Current finished, clearing (default)")
 
         self.previous_position = current_position
         self.previous_game_data = game_data
@@ -512,18 +510,16 @@ class FindingFoodGoal(AgentGoal):
         current_position = self.parent.game_data.current_position
         closest_food_entry = self.parent.get_closest_food(current_position, self.parent.game_data.food_positions)
 
-        if self.parent.game_state is not GameState.FINDING_FOOD and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING:
+        valid_goals = [GameState.FINDING_FOOD, GameState.DEPOSITING_FOOD, GameState.ATTACKING]
+        if self.parent.game_state not in valid_goals:
             return "Different goal active"
 
-        if self.parent.game_state is GameState.ATTACKING and self.parent.position_path is not None:
+        if self.parent.game_state is GameState.ATTACKING and self.parent.position_path is not None and not self.parent.position_path.is_completed():
             return "Attacking an enemy already"
 
         if len(remaining_food) == 0 and (self.parent.position_path is None or self.parent.position_path.is_completed()):
             closest_safe = self.parent.get_closest_safe_position(current_position)
-
-            if closest_safe is not None:
-                self.parent.set_position_path(closest_safe, "All food has been consumed, returning home")
-
+            self.parent.set_position_path(closest_safe, "All food has been consumed, returning home")
             return "All food has been collected, returning home"
 
         is_food_square = self.parent.previous_game_data is not None and Position.to_tuple(current_position) in self.parent.previous_game_data.food_positions
@@ -531,7 +527,6 @@ class FindingFoodGoal(AgentGoal):
             self.parent.collected_food += 1
 
         if self.parent.collected_food >= 5 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (closest_food_entry is not None and closest_food_entry[1] >= 2):
-            #print("Depositing food")
             self.parent.set_game_state(GameState.DEPOSITING_FOOD)
             return "Collected at least 5 food, returning home to deposit"
 
@@ -551,21 +546,21 @@ class DepositingFoodGoal(AgentGoal):
         if self.parent.collected_food > 0 and self.parent.is_position_safe(current_position):
             self.parent.collected_food = 0
 
+            if self.parent.game_state is GameState.DEPOSITING_FOOD:
+                self.parent.set_game_state(GameState.FINDING_FOOD)
+
         if self.parent.game_state is not GameState.DEPOSITING_FOOD:
             return "Different goal active"
 
-        if self.parent.position_path is None:
+        if self.parent.position_path is None or not self.parent.position_path.is_completed():
             closest_safe = self.parent.get_closest_safe_position(current_position)
-
-            if closest_safe is not None:
-                self.parent.set_position_path(closest_safe, "Depositing food")
+            self.parent.set_position_path(closest_safe, "Depositing food")
 
             return "Returning home to deposit food"
 
         if not self.parent.position_path.is_completed():
             return "Already executing food deposit"
 
-        self.parent.set_position_path(None, "Clearing position path, deposited food")
         self.parent.set_game_state(GameState.FINDING_FOOD)
         return "Deposited food, switching back to finding food"
 
@@ -574,43 +569,40 @@ class OffensiveFleeingGoal(AgentGoal):
 
     @override
     def compute(self):
-        if self.parent.game_state is GameState.ATTACKING:
-            #print("Attacking")
-            return "Attacking, no need to flee"
-
-        current_position = self.parent.game_data.current_position
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 3)
+        current_position = self.parent.game_data.current_position
+
+        if self.parent.game_state is GameState.ATTACKING:
+            return "We're attacking, ignore fleeing"
+
         if self.parent.game_state is GameState.OFFENSIVE_FLEEING:
-            if valid_enemy is None or self.parent.is_position_safe(current_position):
-                self.parent.set_game_state(self.parent.previous_game_state)
-                #print("Resetting state")
+            if valid_enemy is None or valid_enemy["scaredTimer"] > 3:
+                if self.parent.previous_game_state is GameState.ATTACKING:
+                    self.parent.set_game_state(GameState.FINDING_FOOD)
+                else:
+                    self.parent.set_game_state(self.parent.previous_game_state)
+
                 return "Resetting state as we're no longer in danger"
 
-        if valid_enemy is None:
-            # print("No enemy")
-            return "No enemy found, no need to flee"
+        if valid_enemy is None or valid_enemy["scaredTimer"] > 3:
+            self.parent.encounter_counter = 0
+            return "Enemy is not a threat"
 
-        if self.parent.encounter_counter >= 1 and (self.parent.position_path is None or self.parent.position_path is not None and self.parent.position_path.is_completed()):
+        if self.parent.position_path is None or self.parent.position_path is not None and self.parent.position_path.is_completed():
             restricted = [self.parent.previous_position]
             random_position = self.parent.get_random_reposition_position(self.parent.game_data, current_position)
 
             self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_position, restricted), "Being sm0rt and not falling for the good old switcheroo", show=True)
-            #print("Switcheroo ", random_position)
             return "Being sm0rt and not falling for the good old switcheroo"
-        
-        if self.parent.is_position_safe(current_position):
-            return "We're still in safe territory, don't flee"
-        
+
         if self.parent.game_state is GameState.OFFENSIVE_FLEEING:
-            return "Ignored already set state"
+            return "Skipping fleeing, as we're already fleeing"
 
         restricted = [Position.from_tuple(valid_enemy["pos"])]
         closest_safe = self.parent.get_closest_safe_position(current_position, restricted)
         
         self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Offensive)", show=True)
         self.parent.set_game_state(GameState.OFFENSIVE_FLEEING)
-        self.parent.encounter_counter += 1
-        #print("Fleeing")
         return "Found a valid enemy, fleeing"
 
 
@@ -628,8 +620,7 @@ class DefensiveFleeingGoal(AgentGoal):
             return "No valid enemy or pacman"
 
         closest_safe = self.parent.get_closest_safe_position(current_position)
-        if closest_safe is not None:
-            self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Defensive)")
+        self.parent.set_position_path(closest_safe, "Enemy found, fleeing (Defensive)")
 
         self.parent.set_game_state(GameState.DEFENSIVE_FLEEING)
         return "Found a valid enemy, fleeing"
@@ -643,10 +634,10 @@ class DefendingGoal(AgentGoal):
             return "Different goal active"
     
         current_position = self.parent.game_data.current_position
+
         # Initial movement to starting defense position
         if current_position.is_x_between(self.parent.game_data.agent_color.get_spawn_treshold()) and self.parent.position_path is None:
             random_defending_position = self.parent.get_random_defensive_position(self.parent.game_data, current_position, 1_000)
-            
             self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, random_defending_position), "Initial defending position")
             return "Moving to initial defending position"
     
@@ -693,8 +684,6 @@ class AttackingGoal(AgentGoal):
         current_position = self.parent.game_data.current_position
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 4)
 
-        # print("[", self.parent.agent_index, "]", valid_enemy)
-
         if self.parent.game_state is not GameState.ATTACKING:
             return "Not attacking"
 
@@ -708,7 +697,6 @@ class AttackingGoal(AgentGoal):
         target_pos = Position.from_tuple(valid_enemy["pos"])
         self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, target_pos),"Attacking visible enemy")
 
-        # print("Attacking visible enemy")
         return "Attacking visible enemy"
 
 
@@ -720,7 +708,7 @@ class CapsuleFindGoal(AgentGoal):
             self.parent.set_game_state(self.parent.previous_game_state)
             self.parent.expired_capsule = False
             return "Resetting state as we've expended the capsule"
-        
+
         if self.parent.game_state is GameState.FINDING_CAPSULE:
             return "Already finding capsule or eaten"
 
