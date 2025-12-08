@@ -127,7 +127,8 @@ class Capsule:
 
         if self.capsule_active_time <= 0:
             interpreter.expired_capsule = True
-            interpreter.set_game_state(interpreter.previous_game_state)
+            interpreter.set_game_state(GameState.FINDING_FOOD)
+            self.position = None
 
 class AgentColor:
 
@@ -200,10 +201,11 @@ class GameInterpreter:
         self.encounter_counter = 0
         self.capsules = None
         self.expired_capsule = False
+        self.restricted_positions = list()
 
         if self.agent_index == 0:
             self.path_color = format_color(0, 0.4, 0.4)
-            initial_state = GameState.FINDING_FOOD
+            self.initial_state = GameState.FINDING_FOOD
             allowed_goals = [
                 FindingFoodGoal(self),
                 DepositingFoodGoal(self),
@@ -213,13 +215,13 @@ class GameInterpreter:
             ]
         else:
             self.path_color = format_color(0.4, 0.4, 0)
-            initial_state = GameState.DEFENDING
+            self.initial_state = GameState.DEFENDING
             allowed_goals = [
                 DefendingGoal(self),
                 DefensiveFleeingGoal(self)
             ]
 
-        self.game_state = initial_state
+        self.game_state = self.initial_state
         self.allowed_goals = allowed_goals
         
         # TODO: Remove me, this is temp for debug
@@ -240,7 +242,7 @@ class GameInterpreter:
         #if self.position_path is not None and self.displayed_previous_path:
         #    self.display_path(self.position_path.positions, format_color(0.0, 0.0, 0.0))
         #    self.displayed_previous_path = False
-    #
+#
         #if path is not None and show:
         #    self.display_path(path.positions, self.path_color)
         #    self.displayed_previous_path = True
@@ -265,6 +267,15 @@ class GameInterpreter:
 
         return position not in game_state.get_walls().as_list()
 
+    def handle_restricted_positions(self):
+        self.restricted_positions = list()
+
+        if self.game_state is not GameState.ATTACKING:
+            return
+
+        for capsule in self.game_data.capsules:
+            self.restricted_positions.append(capsule.position)
+
     def handle_death(self):
         if self.previous_position is None:
             return
@@ -272,7 +283,7 @@ class GameInterpreter:
         if self.game_data.current_position.distance(self.previous_position) <= 1:
             return
 
-        self.game_state = GameState.FINDING_FOOD
+        self.game_state = self.initial_state
         self.last_safe_position = None
         self.previous_position = None
         self.previous_game_data = None
@@ -280,7 +291,11 @@ class GameInterpreter:
         self.set_position_path(None, "Agent died, clearing")
 
     def handle_capsule_state(self, capsule):
+        if capsule.position is None:
+            return
+
         if capsule.consumed:
+            capsule.decrease_time(self)
             return
 
         found = False
@@ -294,14 +309,9 @@ class GameInterpreter:
         if self.get_distance(capsule.position, self.game_data.current_position) > 2:
             return
 
-        if capsule.capsule_active_time <= 0:
-            return
-
         if self.game_state is not GameState.ATTACKING:
             capsule.eat_capsule(self)
             return
-
-        capsule.decrease_time(self)
 
     def get_distance(self, from_position, to_position):
         if from_position.x > 32 and to_position.x > 32 and from_position.y < 0 and to_position.y < 0:
@@ -457,6 +467,7 @@ class GameInterpreter:
             self.last_safe_position = current_position
 
         self.handle_death()
+        self.handle_restricted_positions()
 
         if self.capsules is None:
             self.capsules = self.game_data.capsules
@@ -505,7 +516,7 @@ class FindingFoodGoal(AgentGoal):
     def compute(self):
         remaining_food = self.parent.game_data.food_positions
         current_position = self.parent.game_data.current_position
-        closest_food_entry = self.parent.get_closest_food(current_position, self.parent.game_data.food_positions)
+        closest_food_entry = self.parent.get_closest_food(current_position, remaining_food)
 
         valid_goals = [GameState.FINDING_FOOD, GameState.DEPOSITING_FOOD, GameState.ATTACKING]
         if self.parent.game_state not in valid_goals:
@@ -530,7 +541,12 @@ class FindingFoodGoal(AgentGoal):
         if self.parent.position_path is not None and not self.parent.position_path.is_completed() or closest_food_entry is None:
             return "Already executing food collection"
 
-        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(closest_food_entry[0])), "New food found")
+        food_position_path = PositionPath(self.parent.game_data, current_position, Position.from_tuple(closest_food_entry[0]), self.parent.restricted_positions)
+        if food_position_path.is_empty():
+            remaining_food.remove(closest_food_entry[0])
+            closest_food_entry = self.parent.get_closest_food(current_position, remaining_food)
+
+        self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, Position.from_tuple(closest_food_entry[0]), self.parent.restricted_positions), "New food found")
         return "Executing new food collection"
 
 
@@ -653,7 +669,7 @@ class DefendingGoal(AgentGoal):
     
             restricted = [Position.from_tuple(nearby_enemy["pos"])]
             closest_safe = self.parent.get_closest_safe_position(current_position, restricted)
-            
+
             self.parent.set_position_path(closest_safe, "Fleeing from enemy")
             return "Fleeing from the enemy in home territory"
 
@@ -724,7 +740,7 @@ class CapsuleFindGoal(AgentGoal):
 
             if distance <= 3:
                 print(self.parent.agent_index, " Setting to find capsule")
-
+                print("pojedu")
                 self.parent.set_game_state(GameState.FINDING_CAPSULE)
                 self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, capsule_position), "Moving to the capsule position")
                 return "Finding Capsule"
