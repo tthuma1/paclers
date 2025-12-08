@@ -465,7 +465,6 @@ class GameInterpreter:
             compute_result = goal.compute()
             detailed_move[goal.__class__] = compute_result
 
-        #print(self.agent_index, " ", detailed_move)
         CustomUniversalAgent.mapped_decisions[self.agent_index].append(detailed_move)
 
         if self.position_path is not None:
@@ -479,7 +478,7 @@ class GameInterpreter:
                     self.previous_game_data = game_data
                     return move
 
-            self.set_position_path(None, "Current finished, clearing")
+            self.set_position_path(None, "Current finished, clearing (default)")
 
         self.previous_position = current_position
         self.previous_game_data = game_data
@@ -520,10 +519,7 @@ class FindingFoodGoal(AgentGoal):
         if is_food_square:
             self.parent.collected_food += 1
 
-        if self.parent.collected_food >= 5 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (closest_food_entry is not None and closest_food_entry[1] >= 2):
-            #print("Depositing food")
-            print("Depositing food due to having enough collected")
-            
+        if self.parent.collected_food >= 5 and self.parent.game_state is not GameState.DEPOSITING_FOOD and self.parent.game_state is not GameState.ATTACKING and (closest_food_entry is not None and closest_food_entry[1] >= 2):            
             self.parent.set_game_state(GameState.DEPOSITING_FOOD)
             return "Collected at least 5 food, returning home to deposit"
 
@@ -682,8 +678,6 @@ class AttackingGoal(AgentGoal):
         current_position = self.parent.game_data.current_position
         valid_enemy = self.parent.get_valid_defensive_enemy(self.parent.game_data, 4)
 
-        # print("[", self.parent.agent_index, "]", valid_enemy)
-
         if self.parent.game_state is not GameState.ATTACKING:
             return "Not attacking"
 
@@ -697,7 +691,6 @@ class AttackingGoal(AgentGoal):
         target_pos = Position.from_tuple(valid_enemy["pos"])
         self.parent.set_position_path(PositionPath(self.parent.game_data, current_position, target_pos),"Attacking visible enemy")
 
-        # print("Attacking visible enemy")
         return "Attacking visible enemy"
 
 
